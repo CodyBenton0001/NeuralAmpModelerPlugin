@@ -1,0 +1,846 @@
+#pragma once
+
+// NAM Tone Gallery
+//
+// A visual browser for a local library of NAM models & IRs, with photos and
+// metadata pulled from TONE3000 (see tools/Add-Tone.ps1).
+//
+// Library layout (default root: Documents/NAM Tones; override by writing a
+// single-line path into ~/.nam_tone_gallery):
+//
+//   NAM Tones/
+//     Some Tone Name/
+//       tone.json   (optional metadata: name, author, description, gear_type,
+//                    tags, image, model, ir)
+//       cover.jpg   (optional photo)
+//       model.nam / cab.wav
+//
+// This file is header-only on purpose: including it from NeuralAmpModeler.cpp
+// (after NeuralAmpModelerControls.h) plus attaching two controls is the only
+// integration needed, so this fork stays easy to rebase on upstream.
+//
+// NOTE: nlohmann::json is already visible here via the NAM Core headers
+// included from NeuralAmpModeler.h (same mechanism Unserialization.cpp uses).
+
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "IControls.h"
+
+using namespace iplug;
+using namespace igraphics;
+
+// Control tag for the gallery overlay. Deliberately defined here (not in
+// ECtrlTags in NeuralAmpModeler.h) with a value far above kNumCtrlTags, so
+// that this fork doesn't have to touch the upstream header at all.
+const int kCtrlTagToneGallery = 1001;
+
+namespace tonegallery
+{
+
+enum class GearType
+{
+  Amp = 0,
+  AmpCab,
+  IR,
+  Other,
+  NumGearTypes
+};
+
+// What the filter tabs cycle through. kFilterAll shows everything.
+enum EGalleryFilter
+{
+  kFilterAll = 0,
+  kFilterAmp,
+  kFilterAmpCab,
+  kFilterIR,
+  kNumFilters
+};
+
+struct ToneEntry
+{
+  std::string directory; // absolute path of the tone's folder
+  std::string name;
+  std::string author;
+  std::string description;
+  GearType gearType = GearType::Other;
+  std::vector<std::string> tags;
+  std::string imagePath; // absolute path, empty if none
+  std::string modelPath; // absolute path of .nam, empty if none
+  std::string irPath; // absolute path of .wav, empty if none
+};
+
+inline GearType GearTypeFromString(std::string s)
+{
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+  if (s == "amp" || s == "amp_head" || s == "head")
+    return GearType::Amp;
+  if (s == "amp_cab" || s == "amp+cab" || s == "ampcab" || s == "full_rig" || s == "rig")
+    return GearType::AmpCab;
+  if (s == "ir" || s == "cab" || s == "cabinet" || s == "impulse_response")
+    return GearType::IR;
+  return GearType::Other;
+}
+
+inline const char* GearTypeChipLabel(GearType t)
+{
+  switch (t)
+  {
+    case GearType::Amp: return "AMP";
+    case GearType::AmpCab: return "AMP+CAB";
+    case GearType::IR: return "IR";
+    default: return "TONE";
+  }
+}
+
+inline bool MatchesFilter(GearType t, int filter)
+{
+  switch (filter)
+  {
+    case kFilterAmp: return t == GearType::Amp;
+    case kFilterAmpCab: return t == GearType::AmpCab;
+    case kFilterIR: return t == GearType::IR;
+    case kFilterAll:
+    default: return true;
+  }
+}
+
+inline std::filesystem::path GetHomeDir()
+{
+#ifdef OS_WIN
+  const char* home = std::getenv("USERPROFILE");
+#else
+  const char* home = std::getenv("HOME");
+#endif
+  return home ? std::filesystem::path(std::filesystem::u8path(home)) : std::filesystem::path();
+}
+
+// Root of the tone library. Default: <home>/Documents/NAM Tones
+// Override: a text file <home>/.nam_tone_gallery whose first line is a path.
+inline std::filesystem::path GetToneLibraryRoot()
+{
+  namespace fs = std::filesystem;
+  const fs::path home = GetHomeDir();
+  if (home.empty())
+    return fs::path();
+
+  const fs::path overrideFile = home / ".nam_tone_gallery";
+  try
+  {
+    if (fs::exists(overrideFile))
+    {
+      std::ifstream f(overrideFile);
+      std::string line;
+      if (std::getline(f, line))
+      {
+        // Trim whitespace / quotes
+        auto NotSpace = [](unsigned char c) { return !std::isspace(c) && c != '"'; };
+        line.erase(line.begin(), std::find_if(line.begin(), line.end(), NotSpace));
+        line.erase(std::find_if(line.rbegin(), line.rend(), NotSpace).base(), line.end());
+        if (!line.empty())
+          return fs::u8path(line);
+      }
+    }
+  }
+  catch (const std::exception&)
+  {
+    // fall through to default
+  }
+  return home / "Documents" / "NAM Tones";
+}
+
+inline bool HasExtension(const std::filesystem::path& p, const char* extLower)
+{
+  std::string e = p.extension().u8string();
+  std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+  return e == extLower;
+}
+
+// Scan one tone folder into an entry. Returns false if the folder holds
+// neither a model nor an IR.
+inline bool ScanToneFolder(const std::filesystem::path& dir, ToneEntry& entry)
+{
+  namespace fs = std::filesystem;
+  entry = ToneEntry();
+  entry.directory = dir.u8string();
+  entry.name = dir.filename().u8string();
+
+  std::vector<fs::path> namFiles, wavFiles, imageFiles;
+  try
+  {
+    for (const auto& item : fs::directory_iterator(dir))
+    {
+      if (!item.is_regular_file())
+        continue;
+      const fs::path& p = item.path();
+      if (HasExtension(p, ".nam"))
+        namFiles.push_back(p);
+      else if (HasExtension(p, ".wav"))
+        wavFiles.push_back(p);
+      else if (HasExtension(p, ".jpg") || HasExtension(p, ".jpeg") || HasExtension(p, ".png"))
+        imageFiles.push_back(p);
+    }
+  }
+  catch (const std::exception&)
+  {
+    return false;
+  }
+  std::sort(namFiles.begin(), namFiles.end());
+  std::sort(wavFiles.begin(), wavFiles.end());
+  std::sort(imageFiles.begin(), imageFiles.end());
+
+  bool haveGearType = false;
+
+  // Metadata, if present
+  const fs::path metaPath = dir / "tone.json";
+  if (fs::exists(metaPath))
+  {
+    try
+    {
+      std::ifstream f(metaPath);
+      nlohmann::json j = nlohmann::json::parse(f, nullptr, true, true); // allow comments
+      auto GetStr = [&j](const char* key) -> std::string {
+        if (j.contains(key) && j[key].is_string())
+          return j[key].get<std::string>();
+        return "";
+      };
+      if (!GetStr("name").empty())
+        entry.name = GetStr("name");
+      entry.author = GetStr("author");
+      entry.description = GetStr("description");
+      const std::string gearStr = GetStr("gear_type");
+      if (!gearStr.empty())
+      {
+        entry.gearType = GearTypeFromString(gearStr);
+        haveGearType = true;
+      }
+      if (j.contains("tags") && j["tags"].is_array())
+        for (const auto& t : j["tags"])
+          if (t.is_string())
+            entry.tags.push_back(t.get<std::string>());
+      const std::string image = GetStr("image");
+      if (!image.empty() && fs::exists(dir / fs::u8path(image)))
+        entry.imagePath = (dir / fs::u8path(image)).u8string();
+      const std::string model = GetStr("model");
+      if (!model.empty() && fs::exists(dir / fs::u8path(model)))
+        entry.modelPath = (dir / fs::u8path(model)).u8string();
+      const std::string ir = GetStr("ir");
+      if (!ir.empty() && fs::exists(dir / fs::u8path(ir)))
+        entry.irPath = (dir / fs::u8path(ir)).u8string();
+    }
+    catch (const std::exception&)
+    {
+      // Bad JSON: keep going with inferred values.
+    }
+  }
+
+  // Fill in anything the metadata didn't provide.
+  if (entry.imagePath.empty() && !imageFiles.empty())
+    entry.imagePath = imageFiles.front().u8string();
+  if (entry.modelPath.empty() && !namFiles.empty())
+    entry.modelPath = namFiles.front().u8string();
+  if (entry.irPath.empty() && !wavFiles.empty())
+    entry.irPath = wavFiles.front().u8string();
+  if (!haveGearType)
+  {
+    if (!entry.modelPath.empty() && !entry.irPath.empty())
+      entry.gearType = GearType::AmpCab;
+    else if (!entry.modelPath.empty())
+      entry.gearType = GearType::Amp;
+    else if (!entry.irPath.empty())
+      entry.gearType = GearType::IR;
+    else
+      entry.gearType = GearType::Other;
+  }
+
+  return !(entry.modelPath.empty() && entry.irPath.empty());
+}
+
+inline std::vector<ToneEntry> ScanToneLibrary(const std::filesystem::path& root)
+{
+  namespace fs = std::filesystem;
+  std::vector<ToneEntry> entries;
+  try
+  {
+    if (root.empty())
+      return entries;
+    if (!fs::exists(root))
+      fs::create_directories(root); // so the user can find where to put tones
+    for (const auto& item : fs::directory_iterator(root))
+    {
+      if (!item.is_directory())
+        continue;
+      ToneEntry entry;
+      if (ScanToneFolder(item.path(), entry))
+        entries.push_back(std::move(entry));
+    }
+  }
+  catch (const std::exception&)
+  {
+    // Leave whatever we managed to collect.
+  }
+  std::sort(entries.begin(), entries.end(), [](const ToneEntry& a, const ToneEntry& b) {
+    auto Lower = [](std::string s) {
+      std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+      return s;
+    };
+    return Lower(a.name) < Lower(b.name);
+  });
+  return entries;
+}
+
+} // namespace tonegallery
+
+// ===========================================================================
+// Controls
+// ===========================================================================
+
+// The top-left button that opens the gallery: draws a little 2x2 grid icon.
+class NAMGalleryButtonControl : public IControl
+{
+public:
+  NAMGalleryButtonControl(const IRECT& bounds, IActionFunction af)
+  : IControl(bounds, af)
+  {
+    SetTooltip("Tone Gallery");
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    if (mMouseIsOver)
+      g.FillEllipse(PluginColors::MOUSEOVER, mRECT);
+
+    const IRECT icon = mRECT.GetCentredInside(16.0f, 16.0f);
+    const float cellSize = 7.0f;
+    const float gap = 2.0f;
+    const IColor color = PluginColors::NAM_THEMEFONTCOLOR;
+    for (int row = 0; row < 2; row++)
+    {
+      for (int col = 0; col < 2; col++)
+      {
+        const float x = icon.L + col * (cellSize + gap);
+        const float y = icon.T + row * (cellSize + gap);
+        g.FillRoundRect(color, IRECT(x, y, x + cellSize, y + cellSize), 1.5f);
+      }
+    }
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    SetDirty(true); // fires the action function
+  }
+};
+
+// Segmented filter tabs: All | Amps | Amp+Cab | Cabs & IRs
+class NAMGalleryFilterControl : public IControl
+{
+public:
+  NAMGalleryFilterControl(const IRECT& bounds, std::function<void(int)> onChanged)
+  : IControl(bounds)
+  , mOnChanged(onChanged)
+  {
+  }
+
+  int GetFilter() const { return mFilter; }
+
+  void Draw(IGraphics& g) override
+  {
+    static const char* labels[tonegallery::kNumFilters] = {"ALL", "AMPS", "AMP+CAB", "CABS & IRS"};
+    const IColor active = PluginColors::NAM_THEMECOLOR;
+    const IColor inactive = PluginColors::NAM_THEMECOLOR.WithOpacity(0.15f);
+    const IText activeText(14.0f, COLOR_BLACK, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    const IText inactiveText(
+      14.0f, PluginColors::NAM_THEMEFONTCOLOR, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+    {
+      const IRECT seg = SegmentRect(i);
+      const bool isActive = (i == mFilter);
+      const bool isOver = (i == mMouseOverIdx);
+      g.FillRoundRect(isActive ? active : inactive, seg, 4.0f);
+      if (isOver && !isActive)
+        g.FillRoundRect(PluginColors::MOUSEOVER, seg, 4.0f);
+      g.DrawText(isActive ? activeText : inactiveText, labels[i], seg);
+    }
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+    {
+      if (SegmentRect(i).Contains(x, y))
+      {
+        if (mFilter != i)
+        {
+          mFilter = i;
+          if (mOnChanged)
+            mOnChanged(mFilter);
+          SetDirty(false);
+        }
+        return;
+      }
+    }
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    int over = -1;
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+      if (SegmentRect(i).Contains(x, y))
+        over = i;
+    if (over != mMouseOverIdx)
+    {
+      mMouseOverIdx = over;
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    mMouseOverIdx = -1;
+    SetDirty(false);
+  }
+
+private:
+  IRECT SegmentRect(int i) const
+  {
+    const float gap = 6.0f;
+    const float w = (mRECT.W() - gap * (tonegallery::kNumFilters - 1)) / tonegallery::kNumFilters;
+    const float x = mRECT.L + i * (w + gap);
+    return IRECT(x, mRECT.T, x + w, mRECT.B);
+  }
+
+  int mFilter = tonegallery::kFilterAll;
+  int mMouseOverIdx = -1;
+  std::function<void(int)> mOnChanged;
+};
+
+// The scrollable grid of tone tiles.
+class NAMToneGridControl : public IControl
+{
+public:
+  static constexpr int kNumCols = 3;
+  static constexpr float kTileGap = 10.0f;
+  static constexpr float kTileHeight = 150.0f;
+  static constexpr float kImageHeight = 92.0f;
+
+  NAMToneGridControl(const IRECT& bounds, std::function<void(const tonegallery::ToneEntry&)> onSelect)
+  : IControl(bounds)
+  , mOnSelect(onSelect)
+  {
+  }
+
+  void SetEntries(std::vector<tonegallery::ToneEntry> entries, const std::string& libraryRoot)
+  {
+    mEntries = std::move(entries);
+    mLibraryRoot = libraryRoot;
+    ApplyFilter();
+  }
+
+  void SetFilter(int filter)
+  {
+    mFilter = filter;
+    ApplyFilter();
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    g.PathClipRegion(mRECT);
+
+    if (mFiltered.empty())
+    {
+      const IText msgText(15.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      std::string msg;
+      if (mEntries.empty())
+        msg = std::string("No tones found.\nPut tone folders in: ") + mLibraryRoot
+              + "\n(Use the Add-Tone helper to grab photos & info from TONE3000.)";
+      else
+        msg = "No tones match this filter.";
+      // Draw line by line; DrawText doesn't handle newlines.
+      std::stringstream ss(msg);
+      std::string line;
+      int i = 0;
+      while (std::getline(ss, line, '\n'))
+      {
+        g.DrawText(msgText, line.c_str(), mRECT.GetMidVPadded(40.0f).SubRectVertical(3, i));
+        i++;
+      }
+    }
+    else
+    {
+      for (int i = 0; i < (int)mFiltered.size(); i++)
+      {
+        const IRECT tile = TileRect(i);
+        if (tile.B < mRECT.T || tile.T > mRECT.B)
+          continue;
+        DrawTile(g, mEntries[mFiltered[i]], tile, i == mMouseOverTile);
+      }
+
+      // Scrollbar
+      const float contentH = ContentHeight();
+      if (contentH > mRECT.H())
+      {
+        const float frac = mRECT.H() / contentH;
+        const float barH = std::max(20.0f, frac * mRECT.H());
+        const float travel = mRECT.H() - barH;
+        const float pos = (mScroll / (contentH - mRECT.H())) * travel;
+        const IRECT bar(mRECT.R - 4.0f, mRECT.T + pos, mRECT.R - 1.0f, mRECT.T + pos + barH);
+        g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.5f), bar, 1.5f);
+      }
+    }
+
+    g.PathClipRegion(); // reset clip
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    const int idx = TileIndexAt(x, y);
+    if (idx >= 0 && mOnSelect)
+      mOnSelect(mEntries[mFiltered[idx]]);
+  }
+
+  void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override { ScrollBy(-d * 40.0f); }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    const int idx = TileIndexAt(x, y);
+    if (idx != mMouseOverTile)
+    {
+      mMouseOverTile = idx;
+      if (idx >= 0)
+      {
+        const tonegallery::ToneEntry& entry = mEntries[mFiltered[idx]];
+        SetTooltip(entry.description.empty() ? entry.name.c_str() : entry.description.c_str());
+      }
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    mMouseOverTile = -1;
+    SetDirty(false);
+  }
+
+private:
+  float ContentHeight() const
+  {
+    const int numRows = ((int)mFiltered.size() + kNumCols - 1) / kNumCols;
+    return numRows * (kTileHeight + kTileGap);
+  }
+
+  void ScrollBy(float amount)
+  {
+    const float maxScroll = std::max(0.0f, ContentHeight() - mRECT.H());
+    const float newScroll = std::min(maxScroll, std::max(0.0f, mScroll + amount));
+    if (newScroll != mScroll)
+    {
+      mScroll = newScroll;
+      SetDirty(false);
+    }
+  }
+
+  void ApplyFilter()
+  {
+    mFiltered.clear();
+    for (int i = 0; i < (int)mEntries.size(); i++)
+      if (tonegallery::MatchesFilter(mEntries[i].gearType, mFilter))
+        mFiltered.push_back(i);
+    mScroll = 0.0f;
+    mMouseOverTile = -1;
+    SetDirty(false);
+  }
+
+  IRECT TileRect(int filteredIdx) const
+  {
+    const int col = filteredIdx % kNumCols;
+    const int row = filteredIdx / kNumCols;
+    const float tileW = (mRECT.W() - (kNumCols - 1) * kTileGap - 8.0f /*scrollbar*/) / kNumCols;
+    const float x = mRECT.L + col * (tileW + kTileGap);
+    const float y = mRECT.T + row * (kTileHeight + kTileGap) - mScroll;
+    return IRECT(x, y, x + tileW, y + kTileHeight);
+  }
+
+  int TileIndexAt(float x, float y) const
+  {
+    for (int i = 0; i < (int)mFiltered.size(); i++)
+    {
+      const IRECT tile = TileRect(i);
+      if (tile.B < mRECT.T || tile.T > mRECT.B)
+        continue;
+      if (tile.Contains(x, y))
+        return i;
+    }
+    return -1;
+  }
+
+  static std::string Ellipsize(const std::string& s, size_t maxChars)
+  {
+    if (s.length() <= maxChars)
+      return s;
+    return s.substr(0, maxChars - 3) + "...";
+  }
+
+  IBitmap* GetImage(const std::string& path)
+  {
+    if (path.empty())
+      return nullptr;
+    auto found = mImageCache.find(path);
+    if (found != mImageCache.end())
+      return found->second.GetAPIBitmap() ? &found->second : nullptr;
+    IBitmap bitmap;
+    try
+    {
+      if (std::filesystem::exists(std::filesystem::u8path(path)))
+        bitmap = GetUI()->LoadBitmap(path.c_str());
+    }
+    catch (const std::exception&)
+    {
+      // keep an invalid bitmap in the cache so we don't retry every frame
+    }
+    auto inserted = mImageCache.insert({path, bitmap});
+    return inserted.first->second.GetAPIBitmap() ? &inserted.first->second : nullptr;
+  }
+
+  void DrawTile(IGraphics& g, const tonegallery::ToneEntry& entry, const IRECT& tile, bool mouseOver)
+  {
+    // Panel
+    g.FillRoundRect(COLOR_BLACK.WithOpacity(0.55f), tile, 6.0f);
+
+    // Image
+    const IRECT imageArea = tile.GetFromTop(kImageHeight).GetPadded(-4.0f);
+    IBitmap* pBitmap = GetImage(entry.imagePath);
+    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0)
+    {
+      // Aspect-fit inside imageArea (DrawFittedBitmap would stretch).
+      const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
+      const float areaAspect = imageArea.W() / imageArea.H();
+      IRECT fit = imageArea;
+      if (bmpAspect > areaAspect)
+        fit = imageArea.GetMidVPadded(0.5f * imageArea.W() / bmpAspect);
+      else
+        fit = imageArea.GetMidHPadded(0.5f * imageArea.H() * bmpAspect);
+      g.DrawFittedBitmap(*pBitmap, fit);
+    }
+    else
+    {
+      g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.08f), imageArea, 4.0f);
+      const IText placeholderText(
+        24.0f, PluginColors::NAM_THEMECOLOR.WithOpacity(0.6f), "Michroma-Regular", EAlign::Center, EVAlign::Middle);
+      g.DrawText(placeholderText, "NAM", imageArea);
+    }
+
+    // Name
+    const IRECT nameArea = tile.GetReducedFromTop(kImageHeight).GetFromTop(20.0f).GetHPadded(-6.0f);
+    const IText nameText(14.0f, COLOR_WHITE, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    g.DrawText(nameText, Ellipsize(entry.name, 24).c_str(), nameArea);
+
+    // Author + gear chip row
+    const IRECT infoArea = tile.GetFromBottom(24.0f).GetPadded(-6.0f);
+    const IText authorText(11.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    if (!entry.author.empty())
+      g.DrawText(authorText, Ellipsize("by " + entry.author, 18).c_str(), infoArea.GetReducedFromRight(64.0f));
+
+    // Chip
+    const IRECT chipArea = infoArea.GetFromRight(60.0f);
+    IColor chipColor;
+    switch (entry.gearType)
+    {
+      case tonegallery::GearType::Amp: chipColor = IColor(255, 219, 148, 43); break; // orange
+      case tonegallery::GearType::AmpCab: chipColor = PluginColors::NAM_THEMECOLOR; break;
+      case tonegallery::GearType::IR: chipColor = IColor(255, 80, 133, 232); break; // blue
+      default: chipColor = IColor(255, 120, 120, 120); break;
+    }
+    g.FillRoundRect(chipColor.WithOpacity(0.25f), chipArea, 6.0f);
+    g.DrawRoundRect(chipColor, chipArea, 6.0f);
+    const IText chipText(10.0f, chipColor.WithContrast(0.3f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    g.DrawText(chipText, tonegallery::GearTypeChipLabel(entry.gearType), chipArea);
+
+    // Hover outline
+    if (mouseOver)
+      g.DrawRoundRect(PluginColors::NAM_THEMECOLOR, tile, 6.0f, nullptr, 2.0f);
+  }
+
+  std::vector<tonegallery::ToneEntry> mEntries;
+  std::vector<int> mFiltered;
+  std::string mLibraryRoot;
+  int mFilter = tonegallery::kFilterAll;
+  float mScroll = 0.0f;
+  int mMouseOverTile = -1;
+  std::map<std::string, IBitmap> mImageCache;
+  std::function<void(const tonegallery::ToneEntry&)> mOnSelect;
+};
+
+// The full-window overlay page, modeled on NAMSettingsPageControl.
+class NAMToneGalleryPageControl : public IContainerBaseWithNamedChildren
+{
+public:
+  NAMToneGalleryPageControl(const IRECT& bounds, const IBitmap& bitmap, ISVG closeSVG, const IVStyle& style,
+                            IFileDialogCompletionHandlerFunc loadModelFunc, IFileDialogCompletionHandlerFunc loadIRFunc)
+  : IContainerBaseWithNamedChildren(bounds)
+  , mBitmap(bitmap)
+  , mCloseSVG(closeSVG)
+  , mStyle(style)
+  , mLoadModelFunc(loadModelFunc)
+  , mLoadIRFunc(loadIRFunc)
+  {
+    mIgnoreMouse = false;
+  }
+
+  bool OnKeyDown(float x, float y, const IKeyPress& key) override
+  {
+    if (key.VK == kVK_ESCAPE)
+    {
+      HideAnimated(true);
+      return true;
+    }
+    return false;
+  }
+
+  void ShowAnimated()
+  {
+    Refresh();
+    HideAnimated(false);
+  }
+
+  void HideAnimated(bool hide)
+  {
+    mWillHide = hide;
+    if (hide == false)
+    {
+      mHide = false;
+    }
+    else // hide subcontrols immediately
+    {
+      ForAllChildrenFunc([hide](int childIdx, IControl* pChild) { pChild->Hide(hide); });
+    }
+
+    SetAnimation(
+      [&](IControl* pCaller) {
+        auto progress = static_cast<float>(pCaller->GetAnimationProgress());
+
+        if (mWillHide)
+          SetBlend(IBlend(EBlend::Default, 1.0f - progress));
+        else
+          SetBlend(IBlend(EBlend::Default, progress));
+
+        if (progress > 1.0f)
+        {
+          pCaller->OnEndAnimation();
+          IContainerBase::Hide(mWillHide);
+          GetUI()->SetAllControlsDirty();
+          return;
+        }
+      },
+      mAnimationTime);
+
+    SetDirty(true);
+  }
+
+  void Refresh()
+  {
+    const std::filesystem::path root = tonegallery::GetToneLibraryRoot();
+    auto entries = tonegallery::ScanToneLibrary(root);
+    if (auto* pGrid = GetGrid())
+      pGrid->SetEntries(std::move(entries), root.u8string());
+  }
+
+  void OnAttached() override
+  {
+    const float pad = 20.0f;
+    const IVStyle titleStyle = DEFAULT_STYLE.WithValueText(IText(30, COLOR_WHITE, "Michroma-Regular"))
+                                 .WithDrawFrame(false)
+                                 .WithShadowOffset(2.f);
+
+    AddNamedChildControl(new IBitmapControl(GetRECT(), mBitmap), mControlNames.bitmap)->SetIgnoreMouse(true);
+
+    const auto titleArea = GetRECT().GetPadded(-(pad + 10.0f)).GetFromTop(50.0f);
+    AddNamedChildControl(new IVLabelControl(titleArea, "TONE GALLERY", titleStyle), mControlNames.title);
+
+    // Filter tabs
+    const auto contentArea = GetRECT().GetPadded(-(pad + 10.0f));
+    const auto filterArea = contentArea.GetReducedFromTop(52.0f).GetFromTop(26.0f).GetMidHPadded(190.0f);
+    auto onFilterChanged = [&](int filter) {
+      if (auto* pGrid = GetGrid())
+        pGrid->SetFilter(filter);
+    };
+    AddNamedChildControl(new NAMGalleryFilterControl(filterArea, onFilterChanged), mControlNames.filters);
+
+    // The grid
+    const auto gridArea = contentArea.GetReducedFromTop(88.0f).GetReducedFromBottom(6.0f);
+    auto onSelect = [&](const tonegallery::ToneEntry& entry) { LoadTone(entry); };
+    AddNamedChildControl(new NAMToneGridControl(gridArea, onSelect), mControlNames.grid);
+
+    // Open-library-folder button (bottom-left corner)
+    const auto folderButtonArea = GetRECT().GetPadded(-pad).GetFromBLHC(120.0f, 20.0f);
+    const IText linkText(13.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    auto openFolderAction = [](IControl* pCaller) {
+      const std::string root = tonegallery::GetToneLibraryRoot().u8string();
+      if (!root.empty())
+        pCaller->GetUI()->OpenURL(root.c_str());
+    };
+    auto* pFolderButton = new IVButtonControl(folderButtonArea, DefaultClickActionFunc, "Open tone folder",
+                                              mStyle.WithDrawFrame(false).WithValueText(linkText));
+    pFolderButton->SetAnimationEndActionFunction(openFolderAction);
+    AddNamedChildControl(pFolderButton, mControlNames.folder);
+
+    // Close button
+    auto closeAction = [&](IControl* pCaller) { HideAnimated(true); };
+    AddNamedChildControl(
+      new NAMSquareButtonControl(CornerButtonArea(GetRECT()), closeAction, mCloseSVG), mControlNames.close);
+
+    OnResize();
+  }
+
+private:
+  NAMToneGridControl* GetGrid() { return static_cast<NAMToneGridControl*>(GetNamedChild(mControlNames.grid)); }
+
+  void LoadTone(const tonegallery::ToneEntry& entry)
+  {
+    // Run the same completion handlers the stock file-browser buttons use.
+    if (!entry.modelPath.empty() && entry.gearType != tonegallery::GearType::IR && mLoadModelFunc)
+    {
+      WDL_String fileName(entry.modelPath.c_str());
+      WDL_String path(entry.directory.c_str());
+      mLoadModelFunc(fileName, path);
+    }
+    if (!entry.irPath.empty()
+        && (entry.gearType == tonegallery::GearType::IR || entry.gearType == tonegallery::GearType::AmpCab)
+        && mLoadIRFunc)
+    {
+      WDL_String fileName(entry.irPath.c_str());
+      WDL_String path(entry.directory.c_str());
+      mLoadIRFunc(fileName, path);
+    }
+    HideAnimated(true);
+  }
+
+  IBitmap mBitmap;
+  ISVG mCloseSVG;
+  IVStyle mStyle;
+  IFileDialogCompletionHandlerFunc mLoadModelFunc;
+  IFileDialogCompletionHandlerFunc mLoadIRFunc;
+  int mAnimationTime = 200;
+  bool mWillHide = false;
+
+  struct ControlNames
+  {
+    const std::string bitmap = "Bitmap";
+    const std::string close = "Close";
+    const std::string filters = "Filters";
+    const std::string folder = "Folder";
+    const std::string grid = "Grid";
+    const std::string title = "Title";
+  } mControlNames;
+};
