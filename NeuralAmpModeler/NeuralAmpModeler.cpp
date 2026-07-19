@@ -16,6 +16,7 @@
 #include "architecture.hpp"
 
 #include "NeuralAmpModelerControls.h"
+#include "NAMToneGalleryControl.h"
 
 using namespace iplug;
 using namespace igraphics;
@@ -73,7 +74,6 @@ const std::string kCalibrateInputParamName = "CalibrateInput";
 const bool kDefaultCalibrateInput = false;
 const std::string kInputCalibrationLevelParamName = "InputCalibrationLevel";
 const double kDefaultInputCalibrationLevel = 12.0;
-
 
 NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 : Plugin(info, MakeConfig(kNumParams, kNumPresets))
@@ -290,6 +290,19 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         pGraphics->GetControlWithTag(kCtrlTagSettingsBox)->As<NAMSettingsPageControl>()->HideAnimated(false);
       },
       gearSVG));
+
+    // Tone Gallery (see NAMToneGalleryControl.h): opener button in the top-left
+    // corner, then the (initially hidden) full-window gallery overlay. A tile
+    // click goes through the same completion handlers as the file browsers.
+    const auto galleryButtonArea = mainArea.GetFromTLHC(50, 50).GetCentredInside(20, 20);
+    pGraphics->AttachControl(new NAMGalleryButtonControl(galleryButtonArea, [pGraphics](IControl* pCaller) {
+      pGraphics->GetControlWithTag(kCtrlTagToneGallery)->As<NAMToneGalleryPageControl>()->ShowAnimated();
+    }));
+    pGraphics
+      ->AttachControl(new NAMToneGalleryPageControl(
+                        b, backgroundBitmap, crossSVG, style, loadModelCompletionHandler, loadIRCompletionHandler),
+                      kCtrlTagToneGallery)
+      ->Hide(true);
 
     pGraphics
       ->AttachControl(new NAMSettingsPageControl(b, backgroundBitmap, inputLevelBackgroundBitmap, switchHandleBitmap,
@@ -847,8 +860,8 @@ void NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
 {
   const bool updateChannels = numChannels != _GetBufferNumChannels();
   const bool updateFrames = updateChannels || (_GetBufferNumFrames() != numFrames);
-  //  if (!updateChannels && !updateFrames)  // Could we do this?
-  //    return;
+  // if (!updateChannels && !updateFrames) // Could we do this?
+  // return;
 
   if (updateChannels)
   {
