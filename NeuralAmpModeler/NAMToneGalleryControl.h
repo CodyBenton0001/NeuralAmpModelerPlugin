@@ -37,10 +37,18 @@
 using namespace iplug;
 using namespace igraphics;
 
-// Control tag for the gallery overlay. Deliberately defined here (not in
-// ECtrlTags in NeuralAmpModeler.h) with a value far above kNumCtrlTags, so
-// that this fork doesn't have to touch the upstream header at all.
+// Control tags for the gallery/sidebar/favorites. Deliberately defined here
+// (not in ECtrlTags in NeuralAmpModeler.h) with values far above kNumCtrlTags,
+// so that this fork doesn't have to touch the upstream header at all.
 const int kCtrlTagToneGallery = 1001;
+const int kCtrlTagToneSidebar = 1002;
+const int kCtrlTagFavoritesBar = 1003;
+
+// Window layout: the always-visible tone list on the left and the favorites
+// bar under the main UI. The main plugin UI keeps its stock 600x400 size;
+// config.h grows PLUG_WIDTH/PLUG_HEIGHT by these amounts.
+const float kSidebarWidth = 210.0f;
+const float kFavoritesBarHeight = 56.0f;
 
 namespace tonegallery
 {
@@ -116,6 +124,24 @@ inline const char* GearTypeChipLabel(GearType t)
     case GearType::IR: return "IR";
     default: return "TONE";
   }
+}
+
+inline IColor GearTypeColor(GearType t)
+{
+  switch (t)
+  {
+    case GearType::Amp: return IColor(255, 219, 148, 43); // orange
+    case GearType::AmpCab: return PluginColors::NAM_THEMECOLOR;
+    case GearType::IR: return IColor(255, 80, 133, 232); // blue
+    default: return IColor(255, 120, 120, 120);
+  }
+}
+
+inline std::string Ellipsize(const std::string& s, size_t maxChars)
+{
+  if (s.length() <= maxChars)
+    return s;
+  return s.substr(0, maxChars - 3) + "...";
 }
 
 inline bool MatchesFilter(GearType t, int filter)
@@ -312,6 +338,73 @@ inline std::vector<ToneEntry> ScanToneLibrary(const std::filesystem::path& root)
     return Lower(a.name) < Lower(b.name);
   });
   return entries;
+}
+
+// --- Favorites persistence (favorites.json in the library root) ------------
+
+inline std::filesystem::path FavoritesFilePath()
+{
+  return GetToneLibraryRoot() / "favorites.json";
+}
+
+inline std::vector<std::string> LoadFavorites()
+{
+  std::vector<std::string> slots(3, "");
+  try
+  {
+    const std::filesystem::path p = FavoritesFilePath();
+    if (std::filesystem::exists(p))
+    {
+      std::ifstream f(p);
+      nlohmann::json j = nlohmann::json::parse(f, nullptr, true, true);
+      if (j.contains("slots") && j["slots"].is_array())
+      {
+        for (size_t i = 0; i < slots.size() && i < j["slots"].size(); i++)
+          if (j["slots"][i].is_string())
+            slots[i] = j["slots"][i].get<std::string>();
+      }
+    }
+  }
+  catch (const std::exception&)
+  {
+    // Corrupt favorites file: start fresh.
+  }
+  return slots;
+}
+
+inline void SaveFavorites(const std::vector<std::string>& slots)
+{
+  try
+  {
+    nlohmann::json j;
+    j["slots"] = slots;
+    std::filesystem::create_directories(GetToneLibraryRoot());
+    std::ofstream f(FavoritesFilePath());
+    f << j.dump(2);
+  }
+  catch (const std::exception&)
+  {
+  }
+}
+
+// Stage a tone's files through the same completion handlers the stock file
+// browser buttons use. Shared by the gallery grid, the sidebar and the
+// favorites bar.
+inline void LoadToneEntryFiles(const ToneEntry& entry, const IFileDialogCompletionHandlerFunc& loadModelFunc,
+                               const IFileDialogCompletionHandlerFunc& loadIRFunc)
+{
+  if (!entry.modelPath.empty() && entry.gearType != GearType::IR && loadModelFunc)
+  {
+    WDL_String fileName(entry.modelPath.c_str());
+    WDL_String path(entry.directory.c_str());
+    loadModelFunc(fileName, path);
+  }
+  if (!entry.irPath.empty() && (entry.gearType == GearType::IR || entry.gearType == GearType::AmpCab) && loadIRFunc)
+  {
+    WDL_String fileName(entry.irPath.c_str());
+    WDL_String path(entry.directory.c_str());
+    loadIRFunc(fileName, path);
+  }
 }
 
 } // namespace tonegallery
@@ -700,6 +793,422 @@ private:
   std::function<void(const tonegallery::ToneEntry&)> mOnSelect;
 };
 
+// ===========================================================================
+// Always-visible panels: favorites bar & tone sidebar
+// ===========================================================================
+
+// Three quick-access favorite slots under the main UI. Left-click loads the
+// tone; right-click clears the slot. Slots are assigned by right-clicking a
+// tone in the sidebar. Stored in favorites.json in the library root.
+class NAMFavoritesBarControl : public IControl
+{
+public:
+  static constexpr int kNumSlots = 3;
+
+  NAMFavoritesBarControl(const IRECT& bounds, IFileDialogCompletionHandlerFunc loadModelFunc,
+                         IFileDialogCompletionHandlerFunc loadIRFunc)
+  : IControl(bounds)
+  , mLoadModelFunc(loadModelFunc)
+  , mLoadIRFunc(loadIRFunc)
+  {
+  }
+
+  void OnAttached() override { Reload(); }
+
+  void Reload()
+  {
+    mSlotNames = tonegallery::LoadFavorites();
+    for (int i = 0; i < kNumSlots; i++)
+    {
+      mSlotEntries[i] = tonegallery::ToneEntry();
+      mSlotValid[i] = false;
+      if (!mSlotNames[i].empty())
+      {
+        try
+        {
+          const std::filesystem::path dir = tonegallery::GetToneLibraryRoot() / tonegallery::UTF8ToPath(mSlotNames[i]);
+          if (std::filesystem::exists(dir))
+            mSlotValid[i] = tonegallery::ScanToneFolder(dir, mSlotEntries[i]);
+        }
+        catch (const std::exception&)
+        {
+        }
+      }
+    }
+    SetDirty(false);
+  }
+
+  void AssignSlot(int slotIdx, const std::string& folderName)
+  {
+    if (slotIdx < 0 || slotIdx >= kNumSlots)
+      return;
+    auto slots = tonegallery::LoadFavorites();
+    slots[slotIdx] = folderName;
+    tonegallery::SaveFavorites(slots);
+    Reload();
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    for (int i = 0; i < kNumSlots; i++)
+    {
+      const IRECT slot = SlotRect(i);
+      const bool valid = mSlotValid[i];
+      const bool over = (i == mMouseOverSlot);
+      const IColor accent = valid ? tonegallery::GearTypeColor(mSlotEntries[i].gearType) : PluginColors::NAM_THEMECOLOR;
+
+      g.FillRoundRect(IColor(255, 30, 30, 34), slot, 8.0f);
+      if (over)
+        g.FillRoundRect(PluginColors::MOUSEOVER, slot, 8.0f);
+      g.DrawRoundRect(valid ? accent.WithOpacity(0.7f) : accent.WithOpacity(0.15f), slot, 8.0f);
+
+      // Numbered badge
+      const IRECT badge = slot.GetFromLeft(slot.H()).GetCentredInside(18.0f);
+      g.FillEllipse(valid ? accent : accent.WithOpacity(0.25f), badge);
+      const IText badgeText(11.0f, COLOR_BLACK, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      const char num[2] = {(char)('1' + i), 0};
+      g.DrawText(badgeText, num, badge);
+
+      // Label
+      const IRECT labelArea = slot.GetReducedFromLeft(slot.H() * 0.85f).GetReducedFromRight(8.0f);
+      if (valid)
+      {
+        const IText nameText(12.0f, COLOR_WHITE, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+        g.DrawText(nameText, tonegallery::Ellipsize(mSlotEntries[i].name, 22).c_str(), labelArea);
+      }
+      else
+      {
+        const IText emptyText(10.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+        g.DrawText(emptyText, "Empty - right-click a tone", labelArea);
+      }
+    }
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    const int idx = SlotAt(x, y);
+    if (idx < 0)
+      return;
+    if (mod.R)
+    {
+      if (mSlotValid[idx])
+      {
+        mMenuSlotIdx = idx;
+        mMenu.Clear();
+        mMenu.AddItem("Clear favorite");
+        GetUI()->CreatePopupMenu(*this, mMenu, IRECT(x, y, x, y));
+      }
+      return;
+    }
+    if (mSlotValid[idx])
+      tonegallery::LoadToneEntryFiles(mSlotEntries[idx], mLoadModelFunc, mLoadIRFunc);
+  }
+
+  void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
+  {
+    if (pSelectedMenu != nullptr && pSelectedMenu->GetChosenItem() != nullptr && mMenuSlotIdx >= 0)
+      AssignSlot(mMenuSlotIdx, "");
+    mMenuSlotIdx = -1;
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    const int idx = SlotAt(x, y);
+    if (idx != mMouseOverSlot)
+    {
+      mMouseOverSlot = idx;
+      if (idx >= 0 && mSlotValid[idx])
+        SetTooltip(mSlotEntries[idx].name.c_str());
+      else
+        SetTooltip("Right-click a tone in the list to assign a favorite");
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    mMouseOverSlot = -1;
+    SetDirty(false);
+  }
+
+private:
+  IRECT SlotRect(int i) const
+  {
+    const IRECT area = mRECT.GetPadded(-8.0f).GetHPadded(-12.0f);
+    const float gap = 10.0f;
+    const float w = (area.W() - gap * (kNumSlots - 1)) / kNumSlots;
+    const float x = area.L + i * (w + gap);
+    return IRECT(x, area.T, x + w, area.B);
+  }
+
+  int SlotAt(float x, float y) const
+  {
+    for (int i = 0; i < kNumSlots; i++)
+      if (SlotRect(i).Contains(x, y))
+        return i;
+    return -1;
+  }
+
+  std::vector<std::string> mSlotNames = std::vector<std::string>(kNumSlots, "");
+  tonegallery::ToneEntry mSlotEntries[kNumSlots];
+  bool mSlotValid[kNumSlots] = {false, false, false};
+  int mMouseOverSlot = -1;
+  int mMenuSlotIdx = -1;
+  IPopupMenu mMenu;
+  IFileDialogCompletionHandlerFunc mLoadModelFunc;
+  IFileDialogCompletionHandlerFunc mLoadIRFunc;
+};
+
+// The always-visible tone list on the left of the main UI. Click to load,
+// right-click to add to a favorite slot, mouse wheel to scroll. The circular
+// arrow at the top rescans the library folder.
+class NAMToneSidebarControl : public IControl
+{
+public:
+  static constexpr float kHeaderHeight = 46.0f;
+  static constexpr float kRowHeight = 34.0f;
+
+  NAMToneSidebarControl(const IRECT& bounds, IFileDialogCompletionHandlerFunc loadModelFunc,
+                        IFileDialogCompletionHandlerFunc loadIRFunc)
+  : IControl(bounds)
+  , mLoadModelFunc(loadModelFunc)
+  , mLoadIRFunc(loadIRFunc)
+  {
+  }
+
+  void OnAttached() override { Refresh(); }
+
+  void Refresh()
+  {
+    mEntries = tonegallery::ScanToneLibrary(tonegallery::GetToneLibraryRoot());
+    if (mScroll > MaxScroll())
+      mScroll = MaxScroll();
+    SetDirty(false);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    // Panel
+    g.FillRect(IColor(255, 24, 24, 27), mRECT);
+    g.FillRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.25f), mRECT.GetFromRight(1.0f));
+
+    // Header
+    const IRECT header = mRECT.GetFromTop(kHeaderHeight);
+    const IText titleText(12.0f, COLOR_WHITE, "Michroma-Regular", EAlign::Near, EVAlign::Middle);
+    g.DrawText(titleText, "TONE LIBRARY", header.GetReducedFromLeft(12.0f).GetFromTop(28.0f));
+    std::stringstream count;
+    count << mEntries.size() << (mEntries.size() == 1 ? " tone" : " tones");
+    const IText countText(10.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    g.DrawText(countText, count.str().c_str(), header.GetReducedFromLeft(12.0f).GetFromBottom(16.0f));
+    g.FillRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.2f), header.GetFromBottom(1.0f));
+
+    // Refresh icon (circular arrow)
+    const IRECT refresh = RefreshRect();
+    const IColor iconColor =
+      mMouseOverRefresh ? PluginColors::NAM_THEMECOLOR : PluginColors::NAM_THEMECOLOR.WithOpacity(0.6f);
+    const float cx = refresh.MW(), cy = refresh.MH(), r = 6.0f;
+    g.DrawArc(iconColor, cx, cy, r, 30.0f, 330.0f, nullptr, 1.6f);
+    g.FillTriangle(iconColor, cx + 1.5f, cy - r - 3.0f, cx + 7.5f, cy - r + 0.5f, cx + 1.5f, cy - r + 4.0f);
+
+    // Rows
+    const IRECT rows = RowsArea();
+    g.PathClipRegion(rows);
+    if (mEntries.empty())
+    {
+      const IText msgText(11.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      g.DrawText(msgText, "No tones yet.", rows.GetFromTop(60.0f).GetVShifted(10.0f));
+      g.DrawText(msgText, "Use the Add-Tone helper,", rows.GetFromTop(60.0f).GetVShifted(26.0f));
+      g.DrawText(msgText, "then click the arrow above.", rows.GetFromTop(60.0f).GetVShifted(42.0f));
+    }
+    for (int i = 0; i < (int)mEntries.size(); i++)
+    {
+      const IRECT row = RowRect(i);
+      if (row.B < rows.T || row.T > rows.B)
+        continue;
+      DrawRow(g, mEntries[i], row, i == mMouseOverRow);
+    }
+    // Scrollbar
+    const float contentH = (float)mEntries.size() * kRowHeight;
+    if (contentH > rows.H())
+    {
+      const float frac = rows.H() / contentH;
+      const float barH = std::max(20.0f, frac * rows.H());
+      const float travel = rows.H() - barH;
+      const float pos = (mScroll / (contentH - rows.H())) * travel;
+      const IRECT bar(rows.R - 3.0f, rows.T + pos, rows.R - 1.0f, rows.T + pos + barH);
+      g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.5f), bar, 1.0f);
+    }
+    g.PathClipRegion();
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (RefreshRect().Contains(x, y))
+    {
+      Refresh();
+      return;
+    }
+    const int idx = RowAt(x, y);
+    if (idx < 0)
+      return;
+    if (mod.R)
+    {
+      mMenuRowIdx = idx;
+      mMenu.Clear();
+      mMenu.AddItem("Add to Favorite 1");
+      mMenu.AddItem("Add to Favorite 2");
+      mMenu.AddItem("Add to Favorite 3");
+      GetUI()->CreatePopupMenu(*this, mMenu, IRECT(x, y, x, y));
+      return;
+    }
+    tonegallery::LoadToneEntryFiles(mEntries[idx], mLoadModelFunc, mLoadIRFunc);
+  }
+
+  void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
+  {
+    if (pSelectedMenu == nullptr || pSelectedMenu->GetChosenItem() == nullptr)
+      return;
+    const int slotIdx = pSelectedMenu->GetChosenItemIdx();
+    if (mMenuRowIdx >= 0 && mMenuRowIdx < (int)mEntries.size() && slotIdx >= 0)
+    {
+      const std::string folderName =
+        tonegallery::PathToUTF8(tonegallery::UTF8ToPath(mEntries[mMenuRowIdx].directory).filename());
+      if (auto* pFav = GetUI()->GetControlWithTag(kCtrlTagFavoritesBar))
+        pFav->As<NAMFavoritesBarControl>()->AssignSlot(slotIdx, folderName);
+    }
+    mMenuRowIdx = -1;
+  }
+
+  void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
+  {
+    const float maxScroll = MaxScroll();
+    const float next = std::min(maxScroll, std::max(0.0f, mScroll - d * 40.0f));
+    if (next != mScroll)
+    {
+      mScroll = next;
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    const bool overRefresh = RefreshRect().Contains(x, y);
+    const int idx = RowAt(x, y);
+    if (idx != mMouseOverRow || overRefresh != mMouseOverRefresh)
+    {
+      mMouseOverRow = idx;
+      mMouseOverRefresh = overRefresh;
+      if (overRefresh)
+        SetTooltip("Rescan the tone folder");
+      else if (idx >= 0)
+      {
+        const tonegallery::ToneEntry& e = mEntries[idx];
+        SetTooltip(e.description.empty() ? e.name.c_str() : e.description.c_str());
+      }
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    mMouseOverRow = -1;
+    mMouseOverRefresh = false;
+    SetDirty(false);
+  }
+
+private:
+  IRECT RowsArea() const { return mRECT.GetReducedFromTop(kHeaderHeight).GetPadded(-4.0f); }
+  IRECT RefreshRect() const { return mRECT.GetFromTop(kHeaderHeight).GetFromRight(30.0f).GetCentredInside(18.0f); }
+  float MaxScroll() const { return std::max(0.0f, (float)mEntries.size() * kRowHeight - RowsArea().H()); }
+
+  IRECT RowRect(int i) const
+  {
+    const IRECT rows = RowsArea();
+    const float y = rows.T + i * kRowHeight - mScroll;
+    return IRECT(rows.L, y, rows.R - 5.0f, y + kRowHeight);
+  }
+
+  int RowAt(float x, float y) const
+  {
+    const IRECT rows = RowsArea();
+    if (!rows.Contains(x, y))
+      return -1;
+    const int idx = (int)((y - rows.T + mScroll) / kRowHeight);
+    return (idx >= 0 && idx < (int)mEntries.size()) ? idx : -1;
+  }
+
+  IBitmap* GetImage(const std::string& path)
+  {
+    if (path.empty())
+      return nullptr;
+    auto found = mImageCache.find(path);
+    if (found != mImageCache.end())
+      return found->second.GetAPIBitmap() ? &found->second : nullptr;
+    IBitmap bitmap;
+    try
+    {
+      if (std::filesystem::exists(tonegallery::UTF8ToPath(path)))
+        bitmap = GetUI()->LoadBitmap(path.c_str());
+    }
+    catch (const std::exception&)
+    {
+    }
+    auto inserted = mImageCache.insert({path, bitmap});
+    return inserted.first->second.GetAPIBitmap() ? &inserted.first->second : nullptr;
+  }
+
+  void DrawRow(IGraphics& g, const tonegallery::ToneEntry& entry, const IRECT& row, bool mouseOver)
+  {
+    if (mouseOver)
+      g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.12f), row, 4.0f);
+
+    // Thumbnail
+    const IRECT thumb = row.GetFromLeft(kRowHeight).GetCentredInside(26.0f);
+    IBitmap* pBitmap = GetImage(entry.imagePath);
+    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0)
+    {
+      const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
+      IRECT fit = thumb;
+      if (bmpAspect > 1.0f)
+        fit = thumb.GetMidVPadded(0.5f * thumb.W() / bmpAspect);
+      else
+        fit = thumb.GetMidHPadded(0.5f * thumb.H() * bmpAspect);
+      g.DrawFittedBitmap(*pBitmap, fit);
+    }
+    else
+    {
+      const IColor c = tonegallery::GearTypeColor(entry.gearType);
+      g.FillRoundRect(c.WithOpacity(0.2f), thumb, 4.0f);
+      const IText initialText(12.0f, c, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      const char initial[2] = {entry.name.empty() ? '?' : (char)std::toupper((unsigned char)entry.name[0]), 0};
+      g.DrawText(initialText, initial, thumb);
+    }
+
+    // Name
+    const IRECT nameArea = row.GetReducedFromLeft(kRowHeight + 4.0f).GetReducedFromRight(14.0f);
+    const IText nameText(12.0f, COLOR_WHITE, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    g.DrawText(nameText, tonegallery::Ellipsize(entry.name, 21).c_str(), nameArea);
+
+    // Gear-type dot
+    const IRECT dot = row.GetFromRight(14.0f).GetCentredInside(6.0f);
+    g.FillEllipse(tonegallery::GearTypeColor(entry.gearType), dot);
+  }
+
+  std::vector<tonegallery::ToneEntry> mEntries;
+  float mScroll = 0.0f;
+  int mMouseOverRow = -1;
+  bool mMouseOverRefresh = false;
+  int mMenuRowIdx = -1;
+  IPopupMenu mMenu;
+  std::map<std::string, IBitmap> mImageCache;
+  IFileDialogCompletionHandlerFunc mLoadModelFunc;
+  IFileDialogCompletionHandlerFunc mLoadIRFunc;
+};
+
 // The full-window overlay page, modeled on NAMSettingsPageControl.
 class NAMToneGalleryPageControl : public IContainerBaseWithNamedChildren
 {
@@ -772,6 +1281,11 @@ public:
     auto entries = tonegallery::ScanToneLibrary(root);
     if (auto* pGrid = GetGrid())
       pGrid->SetEntries(std::move(entries), tonegallery::PathToUTF8(root));
+    // Keep the always-visible panels in sync too.
+    if (auto* pSidebar = GetUI()->GetControlWithTag(kCtrlTagToneSidebar))
+      pSidebar->As<NAMToneSidebarControl>()->Refresh();
+    if (auto* pFav = GetUI()->GetControlWithTag(kCtrlTagFavoritesBar))
+      pFav->As<NAMFavoritesBarControl>()->Reload();
   }
 
   void OnAttached() override
@@ -826,21 +1340,7 @@ private:
 
   void LoadTone(const tonegallery::ToneEntry& entry)
   {
-    // Run the same completion handlers the stock file-browser buttons use.
-    if (!entry.modelPath.empty() && entry.gearType != tonegallery::GearType::IR && mLoadModelFunc)
-    {
-      WDL_String fileName(entry.modelPath.c_str());
-      WDL_String path(entry.directory.c_str());
-      mLoadModelFunc(fileName, path);
-    }
-    if (!entry.irPath.empty()
-        && (entry.gearType == tonegallery::GearType::IR || entry.gearType == tonegallery::GearType::AmpCab)
-        && mLoadIRFunc)
-    {
-      WDL_String fileName(entry.irPath.c_str());
-      WDL_String path(entry.directory.c_str());
-      mLoadIRFunc(fileName, path);
-    }
+    tonegallery::LoadToneEntryFiles(entry, mLoadModelFunc, mLoadIRFunc);
     HideAnimated(true);
   }
 
