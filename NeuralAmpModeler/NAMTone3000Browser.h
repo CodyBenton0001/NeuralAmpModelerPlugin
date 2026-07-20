@@ -346,8 +346,13 @@ inline const char* ApiBase()
   return "https://api.tone3000.com";
 }
 
-inline bool SearchTones(const std::string& query, int page, int pageSize, std::vector<SearchResult>& out,
-                        long long& total, std::string& err)
+// gearFilter: "" (all) or one of the API's gear enum values:
+//   "amp-cab", "amp", "pedal", "outboard", "experimental"
+//   (the API also knows "cab"/"ir"/"space" but its NAM search currently
+//   returns nothing for those -- standalone IRs aren't searchable anonymously)
+// orderBy: "" (default) or "trending" / "newest" / "oldest"
+inline bool SearchTones(const std::string& query, const std::string& gearFilter, const std::string& orderBy, int page,
+                        int pageSize, std::vector<SearchResult>& out, long long& total, std::string& err)
 {
   std::string key = EnsureKey();
   if (key.empty())
@@ -359,6 +364,10 @@ inline bool SearchTones(const std::string& query, int page, int pageSize, std::v
                          {"order_by", nullptr},     {"tag_names", nullptr},       {"make_names", nullptr},
                          {"gear_filters", nullptr}, {"is_calibrated", nullptr},   {"size_filters", nullptr},
                          {"usernames", nullptr},    {"platform_filter", nullptr}, {"architecture_filter", nullptr}};
+  if (!gearFilter.empty())
+    body["gear_filters"] = nlohmann::json::array({gearFilter});
+  if (!orderBy.empty())
+    body["order_by"] = orderBy;
   for (int attempt = 0; attempt < 2; attempt++)
   {
     std::string resp;
@@ -504,7 +513,9 @@ inline std::string GearToType(const std::string& gear)
 {
   std::string g = gear;
   std::transform(g.begin(), g.end(), g.begin(), [](unsigned char c) { return (char)tolower(c); });
-  if (g.find("amp + cab") != std::string::npos || g.find("full rig") != std::string::npos)
+  // The API's gear enum spells it "amp-cab"; the website spells it "amp + cab".
+  if (g.find("amp + cab") != std::string::npos || g.find("amp-cab") != std::string::npos
+      || g.find("amp cab") != std::string::npos || g.find("full rig") != std::string::npos)
     return "amp_cab";
   if (g.find("pedal") != std::string::npos)
     return "pedal";
@@ -678,7 +689,17 @@ struct BrowserShared
   long long total = 0;
   int page = 1;
   std::string query;
+  std::string gear; // active gear_filters value ("" = all)
+  std::string order; // active order_by value ("" = default)
   std::string error;
+};
+
+// Model-file list for the detail page (fetched when a tone is opened).
+struct ModelsShared
+{
+  std::mutex mtx;
+  std::atomic<int> status{0}; // 0=none 1=fetching 2=done 3=error
+  std::vector<ModelFile> models;
 };
 
 struct DownloadShared
@@ -720,24 +741,52 @@ public:
     SetDirty(false);
   }
 
+  // --- Filter chips -------------------------------------------------------
+  static constexpr int kNumGearChips = 6;
+  static constexpr int kNumSortChips = 3;
+  static const char* GearChipLabel(int i)
+  {
+    static const char* kLabels[kNumGearChips] = {"ALL", "AMP+CAB", "AMPS", "PEDALS", "OUTBOARD", "EXPERIMENTAL"};
+    return kLabels[i];
+  }
+  static const char* GearChipValue(int i)
+  {
+    static const char* kValues[kNumGearChips] = {"", "amp-cab", "amp", "pedal", "outboard", "experimental"};
+    return kValues[i];
+  }
+  static const char* SortChipLabel(int i)
+  {
+    static const char* kLabels[kNumSortChips] = {"TRENDING", "NEWEST", "OLDEST"};
+    return kLabels[i];
+  }
+  static const char* SortChipValue(int i)
+  {
+    static const char* kValues[kNumSortChips] = {"trending", "newest", "oldest"};
+    return kValues[i];
+  }
+
   void StartSearch(const std::string& query)
   {
     mHasSearched = true;
     auto shared = mShared;
     const int generation = ++shared->generation;
+    const std::string gear = GearChipValue(mGearSel);
+    const std::string order = SortChipValue(mSortSel);
     {
       std::lock_guard<std::mutex> lock(shared->mtx);
       shared->query = query;
+      shared->gear = gear;
+      shared->order = order;
       shared->error.clear();
       shared->page = 1;
     }
     shared->busy = true;
     mScroll = 0.0f;
-    t3k::Worker::Get().Enqueue([shared, query, generation]() {
+    t3k::Worker::Get().Enqueue([shared, query, gear, order, generation]() {
       std::vector<t3k::SearchResult> results;
       long long total = 0;
       std::string err;
-      const bool ok = t3k::SearchTones(query, 1, kPageSize, results, total, err);
+      const bool ok = t3k::SearchTones(query, gear, order, 1, kPageSize, results, total, err);
       std::lock_guard<std::mutex> lock(shared->mtx);
       if (shared->generation == generation)
       {
@@ -754,6 +803,17 @@ public:
     SetDirty(false);
   }
 
+  // Re-run the current query (used when a filter chip changes).
+  void RestartSearch()
+  {
+    std::string query;
+    {
+      std::lock_guard<std::mutex> lock(mShared->mtx);
+      query = mShared->query;
+    }
+    StartSearch(query);
+  }
+
   void LoadMore()
   {
     auto shared = mShared;
@@ -761,18 +821,20 @@ public:
       return;
     const int generation = shared->generation.load();
     int nextPage;
-    std::string query;
+    std::string query, gear, order;
     {
       std::lock_guard<std::mutex> lock(shared->mtx);
       nextPage = shared->page + 1;
       query = shared->query;
+      gear = shared->gear;
+      order = shared->order;
     }
     shared->busy = true;
-    t3k::Worker::Get().Enqueue([shared, query, nextPage, generation]() {
+    t3k::Worker::Get().Enqueue([shared, query, gear, order, nextPage, generation]() {
       std::vector<t3k::SearchResult> results;
       long long total = 0;
       std::string err;
-      const bool ok = t3k::SearchTones(query, nextPage, kPageSize, results, total, err);
+      const bool ok = t3k::SearchTones(query, gear, order, nextPage, kPageSize, results, total, err);
       std::lock_guard<std::mutex> lock(shared->mtx);
       if (shared->generation == generation)
       {
@@ -813,6 +875,15 @@ public:
     g.DrawLine(xColor, xr.L, xr.T, xr.R, xr.B, nullptr, 1.8f);
     g.DrawLine(xColor, xr.L, xr.B, xr.R, xr.T, nullptr, 1.8f);
 
+    // Detail page replaces the search UI while a tone is open.
+    if (mDetailOpen)
+    {
+      bool thumbLoading = false;
+      DrawDetail(g, accent, content, thumbLoading);
+      FinishDraw(thumbLoading);
+      return;
+    }
+
     // Search field
     const IRECT field = SearchFieldRect();
     g.FillRoundRect(IColor(255, 32, 33, 41), field, field.H() * 0.5f);
@@ -825,23 +896,46 @@ public:
     std::string error;
     long long total = 0;
     size_t numResults = 0;
-    int page = 1;
     {
       std::lock_guard<std::mutex> lock(mShared->mtx);
       query = mShared->query;
       error = mShared->error;
       total = mShared->total;
       numResults = mShared->results.size();
-      page = mShared->page;
     }
     const IText fieldText(
       11.0f, query.empty() ? IColor(255, 110, 113, 122) : COLOR_WHITE, "Inter-Regular", EAlign::Near, EVAlign::Middle);
     g.DrawText(fieldText, query.empty() ? "Search amps, pedals, cabs... (click, type, press Enter)" : query.c_str(),
                field.GetReducedFromLeft(32.0f).GetReducedFromRight(10.0f));
 
+    // Filter chips: gear types on the left, sort order on the right.
+    for (int i = 0; i < kNumGearChips; i++)
+    {
+      const IRECT chip = GearChipRect(i);
+      const bool sel = i == mGearSel;
+      const bool over = mMouseOverGearChip == i;
+      g.FillRoundRect(sel ? accent : IColor(255, 32, 33, 41), chip, chip.H() * 0.5f);
+      if (over && !sel)
+        g.DrawRoundRect(accent, chip, chip.H() * 0.5f);
+      const IText chipText(7.5f, sel ? COLOR_BLACK : (over ? COLOR_WHITE : IColor(255, 150, 153, 162)), "Inter-Bold",
+                           EAlign::Center, EVAlign::Middle);
+      g.DrawText(chipText, GearChipLabel(i), chip);
+    }
+    for (int i = 0; i < kNumSortChips; i++)
+    {
+      const IRECT chip = SortChipRect(i);
+      const bool sel = i == mSortSel;
+      const bool over = mMouseOverSortChip == i;
+      if (sel)
+        g.FillRoundRect(accent.WithOpacity(0.18f), chip, chip.H() * 0.5f);
+      const IText chipText(7.5f, sel ? accent : (over ? COLOR_WHITE : IColor(255, 120, 123, 132)), "Inter-Bold",
+                           EAlign::Center, EVAlign::Middle);
+      g.DrawText(chipText, SortChipLabel(i), chip);
+    }
+
     // Status line
     const IText statusText(9.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Middle);
-    const IRECT statusArea = content.GetReducedFromTop(70.0f).GetFromTop(14.0f);
+    const IRECT statusArea = content.GetReducedFromTop(92.0f).GetFromTop(14.0f);
     if (mShared->busy)
     {
       // spinner
@@ -860,7 +954,7 @@ public:
     else if (numResults > 0)
     {
       std::stringstream ss;
-      ss << numResults << " of " << total << " tones - click one to add it to your library";
+      ss << numResults << " of " << total << " tones - click one for details";
       g.DrawText(statusText, ss.str().c_str(), statusArea);
     }
 
@@ -903,7 +997,13 @@ public:
     }
     g.PathClipRegion();
 
-    // Handle finished downloads on the UI thread: refresh library views once.
+    FinishDraw(anyDownloading);
+  }
+
+  // Common end-of-draw work for both pages: announce finished downloads to
+  // the library views, and keep redrawing while anything is in flight.
+  void FinishDraw(bool keepPolling)
+  {
     for (auto& pair : mDownloads)
     {
       if (pair.second->status == 2 && !pair.second->announced)
@@ -913,10 +1013,11 @@ public:
           pSidebar->As<NAMToneSidebarControl>()->Refresh();
       }
       if (pair.second->status == 1)
-        anyDownloading = true;
+        keepPolling = true;
     }
-
-    if (mShared->busy || anyDownloading)
+    if (mDetailOpen && mDetailModels != nullptr && mDetailModels->status.load() == 1)
+      keepPolling = true;
+    if (mShared->busy || keepPolling)
       SetDirty(false); // keep animating/polling
   }
 
@@ -925,7 +1026,48 @@ public:
     if (CloseRect().Contains(x, y))
     {
       Hide(true);
+      mDetailOpen = false;
       return;
+    }
+    if (mDetailOpen)
+    {
+      if (BackRect().Contains(x, y))
+      {
+        mDetailOpen = false;
+        SetDirty(false);
+        return;
+      }
+      if (DownloadButtonRect().Contains(x, y))
+      {
+        auto found = mDownloads.find(mDetailTone.id);
+        if (found == mDownloads.end() || found->second->status == 3) // not started, or retry after failure
+          StartDownload(mDetailTone);
+      }
+      return;
+    }
+    for (int i = 0; i < kNumGearChips; i++)
+    {
+      if (GearChipRect(i).Contains(x, y))
+      {
+        if (mGearSel != i)
+        {
+          mGearSel = i;
+          RestartSearch();
+        }
+        return;
+      }
+    }
+    for (int i = 0; i < kNumSortChips; i++)
+    {
+      if (SortChipRect(i).Contains(x, y))
+      {
+        if (mSortSel != i)
+        {
+          mSortSel = i;
+          RestartSearch();
+        }
+        return;
+      }
     }
     if (SearchFieldRect().Contains(x, y))
     {
@@ -964,12 +1106,23 @@ public:
         return;
       }
       if (haveClicked)
-        StartDownload(clicked);
+        OpenDetail(clicked);
     }
   }
 
   void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
   {
+    if (mDetailOpen)
+    {
+      const float maxScroll = std::max(0.0f, mDetailContentH - DetailScrollRect().H());
+      const float next = std::min(maxScroll, std::max(0.0f, mDetailScroll - d * 44.0f));
+      if (next != mDetailScroll)
+      {
+        mDetailScroll = next;
+        SetDirty(false);
+      }
+      return;
+    }
     const float maxScroll = std::max(0.0f, ContentHeight() - GridRect().H());
     const float next = std::min(maxScroll, std::max(0.0f, mScroll - d * 44.0f));
     if (next != mScroll)
@@ -983,24 +1136,43 @@ public:
   {
     IControl::OnMouseOver(x, y, mod);
     const bool overClose = CloseRect().Contains(x, y);
-    const bool overField = SearchFieldRect().Contains(x, y);
-    int overCard = -1;
-    bool overMore = false;
-    if (GridRect().Contains(x, y))
+    bool overField = false, overMore = false, overBack = false, overDL = false;
+    int overCard = -1, overGearChip = -1, overSortChip = -1;
+    if (mDetailOpen)
     {
-      std::lock_guard<std::mutex> lock(mShared->mtx);
-      overCard = CardAt(x, y);
-      if ((long long)mShared->results.size() < mShared->total
-          && LoadMoreRect((int)mShared->results.size()).Contains(x, y))
-        overMore = true;
+      overBack = BackRect().Contains(x, y);
+      overDL = DownloadButtonRect().Contains(x, y);
+    }
+    else
+    {
+      overField = SearchFieldRect().Contains(x, y);
+      for (int i = 0; i < kNumGearChips; i++)
+        if (GearChipRect(i).Contains(x, y))
+          overGearChip = i;
+      for (int i = 0; i < kNumSortChips; i++)
+        if (SortChipRect(i).Contains(x, y))
+          overSortChip = i;
+      if (GridRect().Contains(x, y))
+      {
+        std::lock_guard<std::mutex> lock(mShared->mtx);
+        overCard = CardAt(x, y);
+        if ((long long)mShared->results.size() < mShared->total
+            && LoadMoreRect((int)mShared->results.size()).Contains(x, y))
+          overMore = true;
+      }
     }
     if (overClose != mMouseOverClose || overField != mMouseOverField || overCard != mMouseOverCard
-        || overMore != mMouseOverMore)
+        || overMore != mMouseOverMore || overBack != mMouseOverBack || overDL != mMouseOverDL
+        || overGearChip != mMouseOverGearChip || overSortChip != mMouseOverSortChip)
     {
       mMouseOverClose = overClose;
       mMouseOverField = overField;
       mMouseOverCard = overCard;
       mMouseOverMore = overMore;
+      mMouseOverBack = overBack;
+      mMouseOverDL = overDL;
+      mMouseOverGearChip = overGearChip;
+      mMouseOverSortChip = overSortChip;
       SetDirty(false);
     }
   }
@@ -1012,6 +1184,10 @@ public:
     mMouseOverField = false;
     mMouseOverCard = -1;
     mMouseOverMore = false;
+    mMouseOverBack = false;
+    mMouseOverDL = false;
+    mMouseOverGearChip = -1;
+    mMouseOverSortChip = -1;
     SetDirty(false);
   }
 
@@ -1035,7 +1211,277 @@ private:
 
   IRECT CloseRect() const { return mRECT.GetFromTRHC(44.0f, 44.0f).GetCentredInside(22.0f); }
   IRECT SearchFieldRect() const { return mRECT.GetPadded(-24.0f).GetReducedFromTop(32.0f).GetFromTop(30.0f); }
-  IRECT GridRect() const { return mRECT.GetPadded(-24.0f).GetReducedFromTop(90.0f).GetReducedFromBottom(2.0f); }
+  IRECT GridRect() const { return mRECT.GetPadded(-24.0f).GetReducedFromTop(112.0f).GetReducedFromBottom(2.0f); }
+
+  // --- Filter chip geometry ------------------------------------------------
+  static float ChipW(const char* label) { return 14.0f + 4.4f * (float)strlen(label); }
+  IRECT ChipRowRect() const { return mRECT.GetPadded(-24.0f).GetReducedFromTop(68.0f).GetFromTop(18.0f); }
+
+  IRECT GearChipRect(int i) const
+  {
+    const IRECT row = ChipRowRect();
+    float x = row.L;
+    for (int k = 0; k < i; k++)
+      x += ChipW(GearChipLabel(k)) + 6.0f;
+    return IRECT(x, row.T, x + ChipW(GearChipLabel(i)), row.B);
+  }
+
+  IRECT SortChipRect(int i) const
+  {
+    const IRECT row = ChipRowRect();
+    float x = row.R;
+    for (int k = kNumSortChips - 1; k > i; k--)
+      x -= ChipW(SortChipLabel(k)) + 6.0f;
+    x -= ChipW(SortChipLabel(i));
+    return IRECT(x, row.T, x + ChipW(SortChipLabel(i)), row.B);
+  }
+
+  // --- Detail page ---------------------------------------------------------
+  IRECT BackRect() const
+  {
+    const IRECT row = mRECT.GetPadded(-24.0f).GetFromTop(26.0f);
+    return row.GetFromRight(120.0f).GetTranslated(-30.0f, 0.0f);
+  }
+  IRECT DownloadButtonRect() const { return mRECT.GetPadded(-24.0f).GetFromBottom(32.0f).GetMidHPadded(95.0f); }
+  IRECT DetailScrollRect() const
+  {
+    return mRECT.GetPadded(-24.0f).GetReducedFromTop(34.0f).GetReducedFromBottom(42.0f);
+  }
+
+  void OpenDetail(const t3k::SearchResult& tone)
+  {
+    mDetailOpen = true;
+    mDetailTone = tone;
+    mDetailScroll = 0.0f;
+    mDetailContentH = 0.0f;
+    auto ms = std::make_shared<t3k::ModelsShared>();
+    mDetailModels = ms;
+    ms->status = 1;
+    const long long id = tone.id;
+    t3k::Worker::Get().Enqueue([ms, id]() {
+      std::vector<t3k::ModelFile> models;
+      std::string err;
+      const bool ok = t3k::FetchModels(id, models, err);
+      std::lock_guard<std::mutex> lock(ms->mtx);
+      ms->models = std::move(models);
+      ms->status = ok ? 2 : 3;
+    });
+    SetDirty(false);
+  }
+
+  void DrawDetail(IGraphics& g, const IColor& accent, const IRECT& content, bool& thumbLoading)
+  {
+    const t3k::SearchResult& r = mDetailTone;
+
+    // Back button (top row, next to the title)
+    const IRECT back = BackRect();
+    const IColor backColor = mMouseOverBack ? COLOR_WHITE : IColor(255, 150, 153, 162);
+    const IText backText(9.0f, backColor, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    g.DrawText(backText, "< BACK TO RESULTS", back);
+
+    // Scrollable column
+    const IRECT area = DetailScrollRect();
+    g.PathClipRegion(area);
+    float y = area.T - mDetailScroll;
+
+    // Photo, cover-cropped, with a darker-at-the-top gradient like the
+    // library's detail panel.
+    const IRECT photo = IRECT(area.L, y, area.R, y + 150.0f);
+    const IRECT photoVis = photo.Intersect(area);
+    IBitmap* pBitmap = GetThumb(r);
+    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0 && photoVis.W() > 0.5f && photoVis.H() > 0.5f)
+    {
+      const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
+      const float areaAspect = photo.W() / photo.H();
+      IRECT cover = photo;
+      if (bmpAspect > areaAspect)
+        cover = photo.GetMidHPadded(0.5f * photo.H() * bmpAspect);
+      else
+        cover = photo.GetMidVPadded(0.5f * photo.W() / bmpAspect);
+      g.PathClipRegion(photoVis);
+      g.DrawFittedBitmap(*pBitmap, cover);
+      // Dark gradient over the top of the photo (darkest at the very top)
+      g.PathRect(photo.GetFromTop(64.0f));
+      g.PathFill(IPattern::CreateLinearGradient(photo.L, photo.T, photo.L, photo.T + 64.0f,
+                                                {{COLOR_BLACK.WithOpacity(0.6f), 0.0f}, {COLOR_TRANSPARENT, 1.0f}}));
+      g.PathClipRegion(area);
+    }
+    else
+    {
+      g.FillRoundRect(accent.WithOpacity(0.08f), photo, 8.0f);
+      if (!r.imageUrl.empty())
+        thumbLoading = true;
+    }
+    y += 160.0f;
+
+    // Full title
+    const IText titleText(14.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Top);
+    for (const auto& line : tonegallery::WrapLines(r.title, 60, 3))
+    {
+      g.DrawText(titleText, line.c_str(), IRECT(area.L, y, area.R, y + 18.0f));
+      y += 18.0f;
+    }
+    y += 2.0f;
+
+    // Byline
+    const IText byText(9.0f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Top);
+    std::stringstream by;
+    by << "by " << r.author;
+    if (r.downloads > 0)
+      by << "  -  " << r.downloads << " downloads";
+    g.DrawText(byText, by.str().c_str(), IRECT(area.L, y, area.R, y + 12.0f));
+    y += 18.0f;
+
+    // Gear chip + tag chips (flowing, wraps to new rows)
+    {
+      const std::string gearType = t3k::GearToType(r.gear);
+      const tonegallery::GearType gt = tonegallery::GearTypeFromString(gearType);
+      std::vector<std::pair<std::string, IColor>> chips;
+      chips.push_back({tonegallery::GearTypeChipLabel(gt), tonegallery::GearTypeColor(gt)});
+      for (const auto& t : r.tags)
+        chips.push_back({t, IColor(255, 55, 57, 66)});
+      float cx = area.L;
+      for (const auto& chip : chips)
+      {
+        const float w = 12.0f + 4.6f * (float)chip.first.size();
+        if (cx + w > area.R && cx > area.L)
+        {
+          cx = area.L;
+          y += 18.0f;
+        }
+        const IRECT cr = IRECT(cx, y, cx + w, y + 13.0f);
+        g.FillRoundRect(chip.second, cr, 5.0f);
+        const bool dark = &chip == &chips[0]; // gear chip gets dark text on its bright color
+        const IText chipText(
+          7.0f, dark ? COLOR_BLACK : IColor(255, 190, 193, 202), "Inter-Bold", EAlign::Center, EVAlign::Middle);
+        g.DrawText(chipText, chip.first.c_str(), cr);
+        cx += w + 5.0f;
+      }
+      y += 24.0f;
+    }
+
+    // Full description
+    if (!r.description.empty())
+    {
+      const IText descText(9.5f, IColor(255, 170, 173, 182), "Inter-Regular", EAlign::Near, EVAlign::Top);
+      for (const auto& line : tonegallery::WrapLines(r.description, 84, 40))
+      {
+        g.DrawText(descText, line.c_str(), IRECT(area.L, y, area.R, y + 13.0f));
+        y += 13.0f;
+      }
+      y += 10.0f;
+    }
+
+    // Variations / included capture files
+    const IText headText(9.0f, IColor(255, 139, 142, 152), "Inter-Bold", EAlign::Near, EVAlign::Top);
+    auto ms = mDetailModels;
+    if (ms != nullptr)
+    {
+      const int status = ms->status.load();
+      if (status == 1)
+      {
+        mSpinnerPhase += 10.0f;
+        if (mSpinnerPhase > 360.0f)
+          mSpinnerPhase -= 360.0f;
+        g.DrawArc(accent, area.L + 6.0f, y + 6.0f, 5.0f, mSpinnerPhase, mSpinnerPhase + 270.0f, nullptr, 1.8f);
+        g.DrawText(headText, "LOADING VARIATIONS...", IRECT(area.L + 16.0f, y, area.R, y + 12.0f));
+        y += 18.0f;
+      }
+      else if (status == 3)
+      {
+        g.DrawText(headText, "COULDN'T LOAD THE FILE LIST", IRECT(area.L, y, area.R, y + 12.0f));
+        y += 18.0f;
+      }
+      else
+      {
+        std::vector<t3k::ModelFile> models;
+        {
+          std::lock_guard<std::mutex> lock(ms->mtx);
+          models = ms->models;
+        }
+        // Same A2-preferred dedupe the download uses, so the list shows
+        // exactly what will land in the library.
+        std::map<std::string, t3k::ModelFile> byName;
+        for (const auto& m : models)
+        {
+          auto found = byName.find(m.name);
+          if (found == byName.end() || (m.arch == "2" && found->second.arch != "2"))
+            byName[m.name] = m;
+        }
+        std::stringstream head;
+        head << "VARIATIONS (" << byName.size() << ")";
+        g.DrawText(headText, head.str().c_str(), IRECT(area.L, y, area.R, y + 12.0f));
+        y += 16.0f;
+        const IText rowText(9.5f, COLOR_WHITE, "Inter-Regular", EAlign::Near, EVAlign::Middle);
+        for (const auto& pair : byName)
+        {
+          const IRECT row = IRECT(area.L, y, area.R, y + 18.0f);
+          if (row.B >= area.T && row.T <= area.B)
+          {
+            g.FillRoundRect(IColor(255, 26, 27, 33), row, 5.0f);
+            g.FillEllipse(accent, IRECT(row.L + 7.0f, row.MH() - 2.0f, row.L + 11.0f, row.MH() + 2.0f));
+            g.DrawText(rowText, tonegallery::Ellipsize(pair.second.name, 70).c_str(),
+                       row.GetReducedFromLeft(16.0f).GetReducedFromRight(34.0f));
+            const bool isA2 = pair.second.arch == "2";
+            const IRECT arcChip = row.GetFromRight(28.0f).GetCentredInside(24.0f, 11.0f);
+            g.FillRoundRect(isA2 ? accent.WithOpacity(0.25f) : IColor(255, 55, 57, 66), arcChip, 4.0f);
+            const IText arcText(
+              6.5f, isA2 ? accent : IColor(255, 150, 153, 162), "Inter-Bold", EAlign::Center, EVAlign::Middle);
+            g.DrawText(arcText, isA2 ? "A2" : "A1", arcChip);
+          }
+          y += 21.0f;
+        }
+      }
+    }
+    y += 6.0f;
+
+    mDetailContentH = (y + mDetailScroll) - area.T;
+
+    // Scrollbar
+    if (mDetailContentH > area.H())
+    {
+      const float frac = area.H() / mDetailContentH;
+      const float barH = std::max(18.0f, frac * area.H());
+      const float travel = area.H() - barH;
+      const float pos = (mDetailScroll / (mDetailContentH - area.H())) * travel;
+      g.FillRoundRect(
+        accent.WithOpacity(0.5f), IRECT(mRECT.R - 6.0f, area.T + pos, mRECT.R - 4.0f, area.T + pos + barH), 1.0f);
+    }
+    g.PathClipRegion();
+
+    // Download button (fixed at the bottom)
+    const IRECT btn = DownloadButtonRect();
+    auto found = mDownloads.find(r.id);
+    const int dlStatus = found != mDownloads.end() ? found->second->status.load() : 0;
+    if (dlStatus == 1)
+    {
+      g.FillRoundRect(accent.WithOpacity(0.25f), btn, btn.H() * 0.5f);
+      mSpinnerPhase += 6.0f;
+      g.DrawArc(accent, btn.L + 16.0f, btn.MH(), 7.0f, mSpinnerPhase, mSpinnerPhase + 270.0f, nullptr, 2.0f);
+      const IText btnText(10.0f, accent, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(btnText, "DOWNLOADING...", btn);
+    }
+    else if (dlStatus == 2)
+    {
+      g.FillRoundRect(IColor(255, 88, 214, 141), btn, btn.H() * 0.5f);
+      const IText btnText(10.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(btnText, "ADDED TO LIBRARY", btn);
+    }
+    else if (dlStatus == 3)
+    {
+      g.FillRoundRect(IColor(255, 232, 90, 90), btn, btn.H() * 0.5f);
+      const IText btnText(10.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(btnText, "FAILED - CLICK TO RETRY", btn);
+    }
+    else
+    {
+      g.FillRoundRect(mMouseOverDL ? accent : accent.WithOpacity(0.85f), btn, btn.H() * 0.5f);
+      if (mMouseOverDL)
+        g.DrawRoundRect(accent.WithOpacity(0.35f), btn.GetPadded(2.0f), btn.H() * 0.5f + 2.0f, nullptr, 2.5f);
+      const IText btnText(10.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(btnText, "DOWNLOAD TONE", btn);
+    }
+  }
 
   float CardWidth() const { return (GridRect().W() - (kNumCols - 1) * kCardGap - 8.0f) / (float)kNumCols; }
 
@@ -1141,7 +1587,12 @@ private:
     // Photo
     const IRECT photo = card.GetFromTop(kPhotoHeight).GetPadded(-1.5f);
     IBitmap* pBitmap = GetThumb(r);
-    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0)
+    // NOTE: photo.Intersect(grid) is EMPTY when the photo part of the card is
+    // scrolled fully out of view, and an empty clip rect means "no clipping"
+    // -- which would splatter the full-size cover image over the whole UI.
+    // Only draw the bitmap when the photo is actually (partly) visible.
+    const IRECT photoVis = photo.Intersect(GridRect());
+    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0 && photoVis.W() > 0.5f && photoVis.H() > 0.5f)
     {
       const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
       const float areaAspect = photo.W() / photo.H();
@@ -1150,7 +1601,7 @@ private:
         cover = photo.GetMidHPadded(0.5f * photo.H() * bmpAspect);
       else
         cover = photo.GetMidVPadded(0.5f * photo.W() / bmpAspect);
-      g.PathClipRegion(photo.Intersect(GridRect()));
+      g.PathClipRegion(photoVis);
       g.DrawFittedBitmap(*pBitmap, cover);
       g.PathClipRegion(GridRect());
     }
@@ -1240,9 +1691,20 @@ private:
   bool mHasSearched = false;
   float mScroll = 0.0f;
   float mSpinnerPhase = 0.0f;
+  int mGearSel = 0;
+  int mSortSel = 0;
+  bool mDetailOpen = false;
+  t3k::SearchResult mDetailTone;
+  std::shared_ptr<t3k::ModelsShared> mDetailModels;
+  float mDetailScroll = 0.0f;
+  float mDetailContentH = 0.0f;
   bool mMouseOverClose = false;
   bool mMouseOverField = false;
   bool mMouseOverMore = false;
+  bool mMouseOverBack = false;
+  bool mMouseOverDL = false;
+  int mMouseOverGearChip = -1;
+  int mMouseOverSortChip = -1;
   int mMouseOverCard = -1;
   IFileDialogCompletionHandlerFunc mLoadModelFunc;
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
