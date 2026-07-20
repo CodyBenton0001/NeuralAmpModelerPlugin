@@ -335,10 +335,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new ThemedMeterControl(inputMeterArea, style), kCtrlTagInputMeter);
     pGraphics->AttachControl(new ThemedMeterControl(outputMeterArea, style), kCtrlTagOutputMeter);
 
-    // Titlebar extras: accent color picker, rack-view and chain-view toggles.
+    // Titlebar extras: accent color picker, rack-view toggle, and the wide
+    // SIGNAL CHAIN button (which doubles as BACK TO RACK while editing).
     pGraphics->AttachControl(new NAMAccentPickerControl(settingsButtonArea.GetTranslated(-28.0f, 0.0f)));
     pGraphics->AttachControl(new NAMRackButtonControl(settingsButtonArea.GetTranslated(-56.0f, 0.0f)));
-    pGraphics->AttachControl(new NAMChainButtonControl(settingsButtonArea.GetTranslated(-84.0f, 0.0f)));
+    const IRECT chainButtonArea(settingsButtonArea.L - 178.0f, settingsButtonArea.MH() - 13.0f,
+                                settingsButtonArea.L - 66.0f, settingsButtonArea.MH() + 13.0f);
+    pGraphics->AttachControl(new NAMChainButtonControl(chainButtonArea));
 
     // Settings/help/about box
     pGraphics->AttachControl(new NAMCircleButtonControl(
@@ -363,28 +366,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                       kCtrlTagToneDetail)
       ->Hide(true);
 
-    // "Editing rack unit N" strip: appears across the top of the main view
-    // while a chain unit's tone is being chosen from the library.
-    pGraphics->AttachControl(new NAMChainEditBannerControl(mainB.GetFromTop(26.0f)), kCtrlTagChainBanner)->Hide(true);
-
-    // Tone Gallery (see NAMToneGalleryControl.h): opener button in the top-left
-    // corner of the main UI, then the (initially hidden) gallery overlay. A
-    // tile click goes through the same completion handlers as the file
-    // browsers.
-    const auto galleryButtonArea = mainArea.GetFromTLHC(50, 50).GetCentredInside(20, 20);
-    pGraphics->AttachControl(new NAMGalleryButtonControl(galleryButtonArea, [pGraphics](IControl* pCaller) {
-      pGraphics->GetControlWithTag(kCtrlTagToneGallery)->As<NAMToneGalleryPageControl>()->ShowAnimated();
-    }));
-    pGraphics
-      ->AttachControl(new NAMToneGalleryPageControl(
-                        mainB, backgroundBitmap, crossSVG, style, loadModelCompletionHandler, loadIRCompletionHandler),
-                      kCtrlTagToneGallery)
-      ->Hide(true);
-
-    // TONE3000 live search (see NAMTone3000Browser.h): globe button next to
-    // the gallery button opens an in-plugin browser that searches tone3000.com
-    // and downloads tones straight into the local library.
-    pGraphics->AttachControl(new NAMT3KButtonControl(galleryButtonArea.GetTranslated(28.0f, 0.0f)));
+    // TONE3000 live search (see NAMTone3000Browser.h): a proper two-line
+    // button in the top-left of the main panel opens the in-plugin browser
+    // that searches tone3000.com and downloads tones into the library.
+    const IRECT t3kButtonArea = mainArea.GetFromTLHC(130.0f, 50.0f).GetCentredInside(118.0f, 38.0f);
+    pGraphics->AttachControl(new NAMT3KButtonControl(t3kButtonArea));
     pGraphics
       ->AttachControl(
         new NAMTone3000BrowserControl(mainB, loadModelCompletionHandler, loadIRCompletionHandler), kCtrlTagTone3000)
@@ -438,12 +424,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     else
     {
       pGraphics->Resize(PLUG_WIDTH, PLUG_HEIGHT, pGraphics->GetDrawScale());
-      // Still choosing a tone for a chain unit? Bring the banner back.
-      if (mChainEditSlot >= 0)
-      {
-        if (IControl* pBanner = pGraphics->GetControlWithTag(kCtrlTagChainBanner))
-          pBanner->Hide(false);
-      }
     }
 
     // Restore the "now playing" display (sidebar glow, favorites, detail
