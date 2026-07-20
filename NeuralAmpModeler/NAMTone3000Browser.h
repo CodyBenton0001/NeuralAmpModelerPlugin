@@ -2092,30 +2092,63 @@ private:
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
 };
 
-// Titlebar button: a little globe that opens the TONE3000 browser.
+// The TONE3000 button (top-left of the main panel): a proper two-line button
+// that opens the live search browser.
 class NAMT3KButtonControl : public IControl
 {
 public:
   NAMT3KButtonControl(const IRECT& bounds)
   : IControl(bounds)
   {
-    SetTooltip("Browse TONE3000");
+    SetTooltip("Search tone3000.com and download tones");
   }
 
   void Draw(IGraphics& g) override
   {
+    const IColor accent = tonegallery::AccentColor();
+
+    // Button body
+    g.FillRoundRect(IColor(255, 32, 33, 41), mRECT, 9.0f);
     if (mMouseIsOver)
-      g.FillRoundRect(PluginColors::MOUSEOVER, mRECT, 4.0f);
-    const IColor c = tonegallery::AccentColor();
-    const IRECT globe = mRECT.GetCentredInside(14.0f);
-    g.DrawEllipse(c, globe, nullptr, 1.4f);
-    g.DrawEllipse(c, globe.GetMidHPadded(3.5f), nullptr, 1.0f);
-    g.DrawLine(c, globe.L, globe.MH(), globe.R, globe.MH(), nullptr, 1.0f);
+    {
+      g.FillRoundRect(accent.WithOpacity(0.12f), mRECT, 9.0f);
+      g.DrawRoundRect(accent, mRECT, 9.0f, nullptr, 1.4f);
+    }
+    else
+    {
+      g.DrawRoundRect(IColor(36, 255, 255, 255), mRECT, 9.0f);
+    }
+
+    // Globe icon on the left
+    const IRECT globe = mRECT.GetFromLeft(34.0f).GetCentredInside(16.0f);
+    g.DrawEllipse(accent, globe, nullptr, 1.5f);
+    g.DrawEllipse(accent, globe.GetMidHPadded(4.0f), nullptr, 1.1f);
+    g.DrawLine(accent, globe.L, globe.MH(), globe.R, globe.MH(), nullptr, 1.1f);
+
+    // Two-line label: TONE3000 over TONE SEARCH
+    const IRECT textArea = mRECT.GetReducedFromLeft(34.0f).GetReducedFromRight(8.0f);
+    const IText brandText(11.5f, accent, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    g.DrawText(brandText, "TONE3000", textArea.GetFromTop(textArea.H() * 0.55f).GetVShifted(2.0f));
+    const IText subText(
+      7.5f, mMouseIsOver ? COLOR_WHITE : IColor(255, 150, 153, 162), "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    g.DrawText(subText, "TONE SEARCH", textArea.GetFromBottom(textArea.H() * 0.45f).GetVShifted(-3.0f));
   }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
     if (IControl* pBrowser = GetUI()->GetControlWithTag(kCtrlTagTone3000))
       pBrowser->As<NAMTone3000BrowserControl>()->Show();
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    SetDirty(false);
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    SetDirty(false);
   }
 };
