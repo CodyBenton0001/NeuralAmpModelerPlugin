@@ -453,8 +453,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         {
           if (tonegallery::UTF8ToPath(entry.directory) == modelDir)
           {
-            tonegallery::NotifyNowPlaying(
-              pGraphics, entry, mNAMPath.Get(), mIRPath.GetLength() ? mIRPath.Get() : std::string());
+            tonegallery::NotifyNowPlaying(pGraphics, entry, mNAMPath.Get(),
+                                          mIRPath.GetLength() ? mIRPath.Get() : std::string(),
+                                          /* force: this really is the main tone */ true);
             break;
           }
         }
