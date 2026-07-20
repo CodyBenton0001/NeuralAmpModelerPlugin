@@ -255,15 +255,20 @@ inline std::string ExtractKeyFromSite()
   if (!key.empty())
     return key;
 
-  // Collect chunk URLs
+  // Collect ALL chunk URLs referenced by the page. The key sits in one
+  // specific chunk whose position in the list changes between site builds
+  // (observed at index 18 of ~32), so no small cap works -- scan them all,
+  // stopping as soon as the key turns up.
   std::vector<std::string> chunks;
   size_t i = html.find("/_next/static/");
-  while (i != std::string::npos && chunks.size() < 12)
+  while (i != std::string::npos && chunks.size() < 64)
   {
     const size_t end = html.find('"', i);
     if (end == std::string::npos)
       break;
-    const std::string rel = html.substr(i, end - i);
+    std::string rel = html.substr(i, end - i);
+    while (!rel.empty() && rel.back() == '\\') // JSON-escaped quote in inline scripts
+      rel.pop_back();
     if (rel.size() > 3 && rel.find(".js") != std::string::npos)
     {
       const std::string full = "https://www.tone3000.com" + rel;
