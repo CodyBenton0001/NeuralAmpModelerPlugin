@@ -83,6 +83,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 : Plugin(info, MakeConfig(kNumParams, kNumPresets))
 {
   _InitToneStack();
+  // Tone Gallery fork: each extra chain slot gets its own tone stack.
+  for (int ci = 0; ci < kNumChainSlots; ci++)
+    mChainToneStacks[ci] = std::make_unique<dsp::tone_stack::BasicNamToneStack>();
   nam::activations::Activation::enable_fast_tanh();
   // Allow the editor to shrink down to rack-view height (the host clamps
   // resize requests to these constraints).
@@ -571,6 +574,11 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     const bool haveSlotDSP = (slot.model != nullptr) || (slot.ir != nullptr);
     if (!haveSlotDSP)
       continue;
+    // Per-unit input gain (drives the unit harder or softer)
+    const double slotInGain = DBToAmp(slot.inputDB.load());
+    if (slotInGain != 1.0)
+      for (size_t s = 0; s < numFrames; s++)
+        chainPointers[0][s] *= slotInGain;
     if (slot.model != nullptr)
     {
       if (mChainArrays[ci].size() != numFrames)
@@ -579,6 +587,11 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       slot.model->process(chainPointers, &mChainScratchPointers[ci], nFrames);
       chainPointers = &mChainScratchPointers[ci];
     }
+    // Per-unit EQ; 5/5/5 = flat = skipped entirely.
+    const double sb = slot.bass.load(), sm = slot.middle.load(), st = slot.treble.load();
+    if (mChainToneStacks[ci] != nullptr
+        && (std::abs(sb - 5.0) > 0.01 || std::abs(sm - 5.0) > 0.01 || std::abs(st - 5.0) > 0.01))
+      chainPointers = mChainToneStacks[ci]->Process(chainPointers, numChannelsInternal, nFrames);
     if (slot.ir != nullptr)
       chainPointers = slot.ir->Process(chainPointers, numChannelsInternal, numFrames);
     const double slotGain = DBToAmp(slot.levelDB.load());
@@ -625,6 +638,18 @@ void NeuralAmpModeler::OnReset()
   // If there is a model or IR loaded, they need to be checked for resampling.
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mToneStack->Reset(sampleRate, maxBlockSize);
+  // Tone Gallery fork: reset the chain slots' tone stacks (and re-apply
+  // their stored EQ, since Reset can clear filter state).
+  for (int ci = 0; ci < kNumChainSlots; ci++)
+  {
+    if (mChainToneStacks[ci] != nullptr)
+    {
+      mChainToneStacks[ci]->Reset(sampleRate, maxBlockSize);
+      mChainToneStacks[ci]->SetParam("bass", mChainSlots[ci].bass.load());
+      mChainToneStacks[ci]->SetParam("middle", mChainSlots[ci].middle.load());
+      mChainToneStacks[ci]->SetParam("treble", mChainSlots[ci].treble.load());
+    }
+  }
   _UpdateLatency();
 }
 
@@ -676,7 +701,7 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
   // Tone Gallery fork: append the signal-chain block. Old versions of the
   // plugin simply never read this far, so this stays backwards-compatible.
-  chunk.PutStr("###NAMChainV1###");
+  chunk.PutStr("###NAMChainV2###");
   int mainEnabled = mChainMainEnabled.load() ? 1 : 0;
   double mainLevel = mChainMainLevelDB.load();
   int chainMode = mToneChainMode ? 1 : 0;
@@ -693,6 +718,15 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
     double level = slot.levelDB.load();
     chunk.Put(&enabled);
     chunk.Put(&level);
+    // V2: per-unit knob settings
+    double inputDB = slot.inputDB.load();
+    double bass = slot.bass.load();
+    double middle = slot.middle.load();
+    double treble = slot.treble.load();
+    chunk.Put(&inputDB);
+    chunk.Put(&bass);
+    chunk.Put(&middle);
+    chunk.Put(&treble);
   }
   return ok;
 }
@@ -708,6 +742,10 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     ChainSlot& slot = mChainSlots[ci];
     slot.enabled = true;
     slot.levelDB = 0.0;
+    slot.inputDB = 0.0;
+    slot.bass = 5.0;
+    slot.middle = 5.0;
+    slot.treble = 5.0;
     slot.tonePath.Set("");
     slot.modelPath.Set("");
     slot.irPath.Set("");
@@ -717,7 +755,9 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
 
   WDL_String marker;
   int pos = chunk.GetStr(marker, startPos);
-  if (pos <= startPos || strcmp(marker.Get(), "###NAMChainV1###") != 0)
+  const bool isV1 = pos > startPos && strcmp(marker.Get(), "###NAMChainV1###") == 0;
+  const bool isV2 = pos > startPos && strcmp(marker.Get(), "###NAMChainV2###") == 0;
+  if (!isV1 && !isV2)
     return startPos; // no chain block in this save
 
   int mainEnabled = 1, chainMode = 0;
@@ -756,8 +796,34 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     pos = chunk.Get(&level, pos);
     if (pos < 0)
       return startPos;
+    double inputDB = 0.0, bass = 5.0, middle = 5.0, treble = 5.0;
+    if (isV2)
+    {
+      pos = chunk.Get(&inputDB, pos);
+      if (pos < 0)
+        return startPos;
+      pos = chunk.Get(&bass, pos);
+      if (pos < 0)
+        return startPos;
+      pos = chunk.Get(&middle, pos);
+      if (pos < 0)
+        return startPos;
+      pos = chunk.Get(&treble, pos);
+      if (pos < 0)
+        return startPos;
+    }
     slot.enabled = enabled != 0;
     slot.levelDB = level;
+    slot.inputDB = inputDB;
+    slot.bass = bass;
+    slot.middle = middle;
+    slot.treble = treble;
+    if (mChainToneStacks[ci] != nullptr)
+    {
+      mChainToneStacks[ci]->SetParam("bass", bass);
+      mChainToneStacks[ci]->SetParam("middle", middle);
+      mChainToneStacks[ci]->SetParam("treble", treble);
+    }
     SetChainTone(ci, modelPath.Get(), irPath.Get(), tonePath.Get());
   }
   return pos;
@@ -814,6 +880,33 @@ void NeuralAmpModeler::OnUIOpen()
 
 void NeuralAmpModeler::OnParamChange(int paramIdx)
 {
+  // Tone Gallery fork: while a rack unit (2..4) is being edited, the main
+  // knobs drive that chain slot's own settings instead of the globals.
+  if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+  {
+    const int ci = mChainEditSlot - 1;
+    switch (paramIdx)
+    {
+      case kInputLevel: mChainSlots[ci].inputDB = GetParam(paramIdx)->Value(); return;
+      case kOutputLevel: mChainSlots[ci].levelDB = GetParam(paramIdx)->Value(); return;
+      case kToneBass:
+        mChainSlots[ci].bass = GetParam(paramIdx)->Value();
+        if (mChainToneStacks[ci] != nullptr)
+          mChainToneStacks[ci]->SetParam("bass", GetParam(paramIdx)->Value());
+        return;
+      case kToneMid:
+        mChainSlots[ci].middle = GetParam(paramIdx)->Value();
+        if (mChainToneStacks[ci] != nullptr)
+          mChainToneStacks[ci]->SetParam("middle", GetParam(paramIdx)->Value());
+        return;
+      case kToneTreble:
+        mChainSlots[ci].treble = GetParam(paramIdx)->Value();
+        if (mChainToneStacks[ci] != nullptr)
+          mChainToneStacks[ci]->SetParam("treble", GetParam(paramIdx)->Value());
+        return;
+      default: break; // gate, toggles, etc. stay global
+    }
+  }
   switch (paramIdx)
   {
     // Changes to the input gain
@@ -1266,6 +1359,50 @@ void NeuralAmpModeler::SetChainTone(int slot, const char* modelPath, const char*
   _StageChainModel(slot, modelPath);
   _StageChainIR(slot, irPath);
   mChainSlots[slot].tonePath.Set(tonePath != nullptr ? tonePath : "");
+}
+
+void NeuralAmpModeler::BeginChainKnobEdit(int unit)
+{
+  // Switching straight from one edit to another? Close out the old one so
+  // the backup/restore pairing stays clean.
+  if (mKnobEditActive && mChainEditSlot >= 1)
+    EndChainKnobEdit();
+  mChainEditSlot = unit;
+  if (unit < 1 || unit > kNumChainSlots)
+    return; // unit 1 (the main tone) uses the knobs as normal
+
+  static const int kKnobs[5] = {kInputLevel, kToneBass, kToneMid, kToneTreble, kOutputLevel};
+  if (!mKnobEditActive)
+  {
+    for (int i = 0; i < 5; i++)
+      mMainKnobBackup[i] = GetParam(kKnobs[i])->Value();
+    mKnobEditActive = true;
+  }
+  ChainSlot& slot = mChainSlots[unit - 1];
+  const double values[5] = {
+    slot.inputDB.load(), slot.bass.load(), slot.middle.load(), slot.treble.load(), slot.levelDB.load()};
+  for (int i = 0; i < 5; i++)
+    _SetKnobParamAndNotify(kKnobs[i], values[i]);
+}
+
+void NeuralAmpModeler::EndChainKnobEdit()
+{
+  mChainEditSlot = -1;
+  if (!mKnobEditActive)
+    return;
+  mKnobEditActive = false;
+  static const int kKnobs[5] = {kInputLevel, kToneBass, kToneMid, kToneTreble, kOutputLevel};
+  for (int i = 0; i < 5; i++)
+    _SetKnobParamAndNotify(kKnobs[i], mMainKnobBackup[i]);
+}
+
+void NeuralAmpModeler::_SetKnobParamAndNotify(int paramIdx, double value)
+{
+  GetParam(paramIdx)->Set(value);
+  // Update the on-screen knob...
+  SendParameterValueFromDelegate(paramIdx, GetParam(paramIdx)->GetNormalized(), true);
+  // ...and apply the change to the DSP.
+  OnParamChange(paramIdx);
 }
 
 size_t NeuralAmpModeler::_GetBufferNumChannels() const
