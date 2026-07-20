@@ -203,6 +203,22 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto loadModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
       if (fileName.GetLength())
       {
+        // Tone Gallery fork: while editing a chain unit, loads go to that
+        // slot instead of the main model. Loading a different tone folder
+        // also clears the slot's old IR so tones swap cleanly.
+        if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+        {
+          const int slot = mChainEditSlot - 1;
+          if (strcmp(mChainSlots[slot].tonePath.Get(), path.Get()) != 0)
+          {
+            mChainSlots[slot].irPath.Set("");
+            mChainSlots[slot].removeIR = true;
+          }
+          _StageChainModel(slot, fileName.Get());
+          mChainSlots[slot].tonePath.Set(path.Get());
+          mChainSlots[slot].enabled = true;
+          return;
+        }
         // Sets mNAMPath and mStagedNAM
         const std::string msg = _StageModel(fileName);
         // TODO error messages like the IR loader.
@@ -220,6 +236,21 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto loadIRCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
       if (fileName.GetLength())
       {
+        // Tone Gallery fork: route into the chain slot being edited. An
+        // IR-only tone (a cab) clears the slot's old amp model.
+        if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+        {
+          const int slot = mChainEditSlot - 1;
+          if (strcmp(mChainSlots[slot].tonePath.Get(), path.Get()) != 0)
+          {
+            mChainSlots[slot].modelPath.Set("");
+            mChainSlots[slot].removeModel = true;
+          }
+          _StageChainIR(slot, fileName.Get());
+          mChainSlots[slot].tonePath.Set(path.Get());
+          mChainSlots[slot].enabled = true;
+          return;
+        }
         mIRPath = fileName;
         const dsp::wav::LoadReturnCode retCode = _StageIR(fileName);
         if (retCode != dsp::wav::LoadReturnCode::SUCCESS)
@@ -327,6 +358,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                       kCtrlTagToneDetail)
       ->Hide(true);
 
+    // "Editing rack unit N" strip: appears across the top of the main view
+    // while a chain unit's tone is being chosen from the library.
+    pGraphics->AttachControl(new NAMChainEditBannerControl(mainB.GetFromTop(26.0f)), kCtrlTagChainBanner)->Hide(true);
+
     // Tone Gallery (see NAMToneGalleryControl.h): opener button in the top-left
     // corner of the main UI, then the (initially hidden) gallery overlay. A
     // tile click goes through the same completion handlers as the file
@@ -398,6 +433,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     else
     {
       pGraphics->Resize(PLUG_WIDTH, PLUG_HEIGHT, pGraphics->GetDrawScale());
+      // Still choosing a tone for a chain unit? Bring the banner back.
+      if (mChainEditSlot >= 0)
+      {
+        if (IControl* pBanner = pGraphics->GetControlWithTag(kCtrlTagChainBanner))
+          pBanner->Hide(false);
+      }
     }
 
     // Restore the "now playing" display (sidebar glow, favorites, detail
