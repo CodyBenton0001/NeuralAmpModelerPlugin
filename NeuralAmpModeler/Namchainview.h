@@ -34,6 +34,15 @@ public:
   {
     mMainEntry = entry;
     mHasMainEntry = true;
+    if (!modelPath.empty())
+      mMainModelPath = modelPath;
+    if (!irPath.empty())
+      mMainIRPath = irPath;
+    if (modelPath.empty() && irPath.empty())
+    {
+      mMainModelPath = entry.modelPath;
+      mMainIRPath = entry.irPath;
+    }
     SetDirty(false);
   }
 
@@ -76,7 +85,7 @@ public:
     if (ExpandRect().Contains(x, y))
     {
       PLUG()->mToneChainMode = false;
-      PLUG()->mChainEditSlot = -1;
+      PLUG()->EndChainKnobEdit();
       Hide(true);
       GetUI()->Resize(PLUG_WIDTH, PLUG_HEIGHT, GetUI()->GetDrawScale());
       return;
@@ -115,7 +124,7 @@ public:
   // and the banner strip brings the user back here when they're done.
   void EnterEditMode(int unit)
   {
-    PLUG()->mChainEditSlot = unit;
+    PLUG()->BeginChainKnobEdit(unit); // also points the main knobs at the unit
     PLUG()->mToneChainMode = false;
     Hide(true);
     if (IControl* pBanner = GetUI()->GetControlWithTag(kCtrlTagChainBanner))
@@ -450,6 +459,41 @@ private:
                  IRECT(text.L, ty, text.R, ty + 12.0f));
     }
 
+    // Which variation (model/IR file) is actually loaded in this unit
+    if (haveTone)
+    {
+      std::string variation;
+      try
+      {
+        std::string vp;
+        if (i == 0)
+          vp = !mMainModelPath.empty() ? mMainModelPath : mMainIRPath;
+        else
+        {
+          const std::string mp = PLUG()->mChainSlots[i - 1].modelPath.Get();
+          const std::string ip = PLUG()->mChainSlots[i - 1].irPath.Get();
+          vp = !mp.empty() ? mp : ip;
+        }
+        if (!vp.empty())
+          variation = tonegallery::PathToUTF8(tonegallery::UTF8ToPath(vp).stem());
+      }
+      catch (const std::exception&)
+      {
+      }
+      if (!variation.empty())
+      {
+        const IText varLabel(6.5f, namtheme::TEXT_FAINT, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+        const IRECT varRow = IRECT(text.L, ty + 19.0f, text.R, ty + 31.0f);
+        IRECT varBounds;
+        g.MeasureText(varLabel, "VARIATION", varBounds);
+        g.DrawText(varLabel, "VARIATION", varRow);
+        const IText varText(
+          8.0f, enabled ? namtheme::TEXT_DIM : namtheme::TEXT_FAINT, "Inter-Regular", EAlign::Near, EVAlign::Middle);
+        g.DrawText(
+          varText, tonegallery::Ellipsize(variation, 34).c_str(), varRow.GetReducedFromLeft(varBounds.W() + 6.0f));
+      }
+    }
+
     // Level knob
     const IRECT knob = KnobRect(i);
     const float cx = knob.MW();
@@ -523,6 +567,8 @@ private:
 
   tonegallery::ToneEntry mMainEntry;
   bool mHasMainEntry = false;
+  std::string mMainModelPath;
+  std::string mMainIRPath;
   tonegallery::ToneEntry mSlotCache[3];
   std::string mSlotCacheKey[3];
   bool mSlotCacheValid[3] = {false, false, false};
@@ -561,11 +607,11 @@ public:
 
     // Pulsing-ish label
     const IText labelText(10.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Middle);
-    char label[64];
+    char label[96];
     if (unit == 0)
-      snprintf(label, sizeof(label), "EDITING RACK UNIT 1 - pick a tone anywhere");
+      snprintf(label, sizeof(label), "EDITING RACK UNIT 1 - tones + knobs now target this unit");
     else
-      snprintf(label, sizeof(label), "EDITING RACK UNIT %d - pick a tone anywhere", unit + 1);
+      snprintf(label, sizeof(label), "EDITING RACK UNIT %d - tones + knobs now target this unit", unit + 1);
     g.DrawText(labelText, label, mRECT.GetReducedFromLeft(14.0f));
 
     // DONE button (right)
@@ -576,7 +622,7 @@ public:
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
-    PLUG()->mChainEditSlot = -1;
+    PLUG()->EndChainKnobEdit(); // hands the knobs back to the main tone
     PLUG()->mToneChainMode = true;
     Hide(true);
     if (IControl* pChain = GetUI()->GetControlWithTag(kCtrlTagChainView))
@@ -624,9 +670,9 @@ public:
   {
     if (IControl* pChain = GetUI()->GetControlWithTag(kCtrlTagChainView))
     {
+      PLUG()->EndChainKnobEdit();
       PLUG()->mToneChainMode = true;
       PLUG()->mToneRackMode = false;
-      PLUG()->mChainEditSlot = -1;
       if (IControl* pRack = GetUI()->GetControlWithTag(kCtrlTagRackView))
         pRack->Hide(true);
       if (IControl* pBanner = GetUI()->GetControlWithTag(kCtrlTagChainBanner))
