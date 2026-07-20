@@ -201,6 +201,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     // Misc Areas
     const auto settingsButtonArea = CornerButtonArea(mainB);
+    // Wide titlebar buttons -- defined up here so the plugin title can be
+    // centered in the space BETWEEN them (no overlap at any accent/name).
+    const IRECT chainButtonArea(settingsButtonArea.L - 178.0f, settingsButtonArea.MH() - 13.0f,
+                                settingsButtonArea.L - 66.0f, settingsButtonArea.MH() + 13.0f);
+    const IRECT t3kButtonArea = mainArea.GetFromTLHC(130.0f, 50.0f).GetCentredInside(118.0f, 38.0f);
 
     // Model loader button
     auto loadModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
@@ -273,7 +278,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachPanelBackground(namtheme::BG);
     pGraphics->AttachControl(
       new ThemedCardControl(knobsArea.GetHPadded(4.0f).GetVPadded(12.0f), namtheme::PANEL2, 12.0f, namtheme::LINE));
-    pGraphics->AttachControl(new ThemedTitleControl(titleArea));
+    // Title, centered between the TONE3000 and SIGNAL CHAIN buttons.
+    pGraphics->AttachControl(
+      new ThemedTitleControl(IRECT(t3kButtonArea.R + 8.0f, titleArea.T, chainButtonArea.L - 8.0f, titleArea.B)));
     pGraphics->AttachControl(new ISVGControl(modelIconArea, modelIconSVG));
 
 #ifdef NAM_PICK_DIRECTORY
@@ -339,8 +346,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // SIGNAL CHAIN button (which doubles as BACK TO RACK while editing).
     pGraphics->AttachControl(new NAMAccentPickerControl(settingsButtonArea.GetTranslated(-28.0f, 0.0f)));
     pGraphics->AttachControl(new NAMRackButtonControl(settingsButtonArea.GetTranslated(-56.0f, 0.0f)));
-    const IRECT chainButtonArea(settingsButtonArea.L - 178.0f, settingsButtonArea.MH() - 13.0f,
-                                settingsButtonArea.L - 66.0f, settingsButtonArea.MH() + 13.0f);
     pGraphics->AttachControl(new NAMChainButtonControl(chainButtonArea));
 
     // Settings/help/about box
@@ -369,7 +374,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // TONE3000 live search (see NAMTone3000Browser.h): a proper two-line
     // button in the top-left of the main panel opens the in-plugin browser
     // that searches tone3000.com and downloads tones into the library.
-    const IRECT t3kButtonArea = mainArea.GetFromTLHC(130.0f, 50.0f).GetCentredInside(118.0f, 38.0f);
     pGraphics->AttachControl(new NAMT3KButtonControl(t3kButtonArea));
     pGraphics
       ->AttachControl(
