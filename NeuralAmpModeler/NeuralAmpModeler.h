@@ -14,7 +14,6 @@
 #include "IPlug_include_in_plug_hdr.h"
 #include "ISender.h"
 
-
 const int kNumPresets = 1;
 // The plugin is mono inside
 constexpr size_t kNumChannelsInternal = 1;
@@ -104,7 +103,7 @@ public:
   , mEncapsulated(std::move(encapsulated))
   , mResampler(GetNAMSampleRate(mEncapsulated))
   {
-    // Assign the encapsulated object's processing function  to this object's member so that the resampler can use it:
+    // Assign the encapsulated object's processing function to this object's member so that the resampler can use it:
     auto ProcessBlockFunc = [&](NAM_SAMPLE** input, NAM_SAMPLE** output, int numFrames) {
       mEncapsulated->process(input, output, numFrames);
     };
@@ -212,6 +211,11 @@ public:
   void OnParamChangeUI(int paramIdx, iplug::EParamSource source) override;
   bool OnMessage(int msgTag, int ctrlTag, int dataSize, const void* pData) override;
 
+  // Tone Gallery fork: whether the compact rack view is active. Lives on the
+  // plugin (not the UI) so it survives the editor window being closed and
+  // reopened.
+  bool mToneRackMode = false;
+
 private:
   // Allocates mInputPointers and mOutputPointers
   void _AllocateIOPointers(const size_t nChans);
@@ -312,7 +316,7 @@ private:
 
   // Post-IR filters
   recursive_linear_filter::HighPass mHighPass;
-  //  recursive_linear_filter::LowPass mLowPass;
+  // recursive_linear_filter::LowPass mLowPass;
 
   // Path to model's config.json or model.nam
   WDL_String mNAMPath;
