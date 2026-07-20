@@ -318,6 +318,19 @@ public:
   {
     mEntry = entry;
     mHasEntry = true;
+    // Remember which variation (file) is actually loaded.
+    std::string vp = !modelPath.empty() ? modelPath : irPath;
+    if (vp.empty())
+      vp = !entry.modelPath.empty() ? entry.modelPath : entry.irPath;
+    mVariation.clear();
+    try
+    {
+      if (!vp.empty())
+        mVariation = tonegallery::PathToUTF8(tonegallery::UTF8ToPath(vp).stem());
+    }
+    catch (const std::exception&)
+    {
+    }
     SetDirty(false);
   }
 
@@ -413,6 +426,13 @@ public:
       {
         const IText authorText(9.0f, namtheme::TEXT_DIM, "Inter-Regular", EAlign::Near, EVAlign::Middle);
         g.DrawText(authorText, ("by " + mEntry.author).c_str(), IRECT(info.L + gw + 8.0f, y + 6.0f, info.R, y + 22.0f));
+      }
+      // Loaded variation (model/IR file)
+      if (!mVariation.empty())
+      {
+        const IText varText(8.0f, namtheme::TEXT_FAINT, "Inter-Regular", EAlign::Near, EVAlign::Middle);
+        g.DrawText(varText, ("variation: " + tonegallery::Ellipsize(mVariation, 40)).c_str(),
+                   IRECT(info.L, y + 26.0f, info.R, y + 38.0f));
       }
     }
     else
@@ -536,6 +556,7 @@ private:
 
   tonegallery::ToneEntry mEntry;
   bool mHasEntry = false;
+  std::string mVariation;
   bool mMouseOverExpand = false;
   int mMouseOverFav = -1;
   std::map<std::string, IBitmap> mImageCache;
@@ -567,9 +588,9 @@ public:
   {
     if (IControl* pRack = GetUI()->GetControlWithTag(kCtrlTagRackView))
     {
+      PLUG()->EndChainKnobEdit();
       PLUG()->mToneRackMode = true;
       PLUG()->mToneChainMode = false;
-      PLUG()->mChainEditSlot = -1;
       if (IControl* pChain = GetUI()->GetControlWithTag(kCtrlTagChainView))
         pChain->Hide(true);
       if (IControl* pBanner = GetUI()->GetControlWithTag(kCtrlTagChainBanner))
