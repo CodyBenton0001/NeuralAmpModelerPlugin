@@ -28,9 +28,10 @@ const IColor TEXT_MAIN(255, 236, 238, 242);
 const IColor TEXT_DIM(255, 139, 142, 152);
 const IColor TEXT_FAINT(255, 90, 93, 102);
 
-inline const IColor& Accent()
+// Runtime accent (user-selectable, persisted by the gallery header).
+inline IColor Accent()
 {
-  return PluginColors::NAM_THEMECOLOR;
+  return tonegallery::AccentColor();
 }
 
 const char* const kFontBody = "Inter-Regular";
@@ -237,4 +238,329 @@ public:
 
 private:
   IColor mAccent;
+};
+
+// Small round button showing the current accent color; click opens a menu of
+// accent choices. Selection is applied live (via the plugin's highlight-color
+// message for style-based controls) and persisted to theme.json.
+class NAMAccentPickerControl : public IControl
+{
+public:
+  NAMAccentPickerControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    SetTooltip("Accent color");
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    if (mMouseIsOver)
+      g.FillEllipse(PluginColors::MOUSEOVER, mRECT);
+    const IRECT dot = mRECT.GetCentredInside(11.0f);
+    g.FillEllipse(namtheme::Accent(), dot);
+    g.DrawEllipse(IColor(90, 255, 255, 255), dot);
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    mMenu.Clear();
+    for (int i = 0; i < kNumChoices; i++)
+      mMenu.AddItem(kChoiceNames[i]);
+    GetUI()->CreatePopupMenu(*this, mMenu, IRECT(x, y, x, y));
+  }
+
+  void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
+  {
+    if (pSelectedMenu == nullptr || pSelectedMenu->GetChosenItem() == nullptr)
+      return;
+    const int idx = pSelectedMenu->GetChosenItemIdx();
+    if (idx < 0 || idx >= kNumChoices)
+      return;
+    const IColor c = kChoiceColors[idx];
+    tonegallery::SetAccentColor(c);
+    // Update all style-based (IVectorBase) controls live via the plugin's
+    // existing highlight-color message.
+    char code[10];
+    snprintf(code, sizeof(code), "#%02X%02X%02X", c.R, c.G, c.B);
+    GetDelegate()->SendArbitraryMsgFromUI(kMsgTagHighlightColor, (int)strlen(code) + 1, code);
+    GetUI()->SetAllControlsDirty();
+  }
+
+private:
+  static constexpr int kNumChoices = 6;
+  static const char* const kChoiceNames[kNumChoices];
+  static const IColor kChoiceColors[kNumChoices];
+  IPopupMenu mMenu;
+};
+
+inline const char* const NAMAccentPickerControl::kChoiceNames[NAMAccentPickerControl::kNumChoices] = {
+  "Violet", "Teal", "Azure", "Orange", "Crimson", "Emerald"};
+inline const IColor NAMAccentPickerControl::kChoiceColors[NAMAccentPickerControl::kNumChoices] = {
+  IColor(255, 139, 124, 246), IColor(255, 46, 230, 200), IColor(255, 80, 133, 232),
+  IColor(255, 240, 160, 74),  IColor(255, 232, 90, 90),  IColor(255, 88, 214, 141)};
+
+// Compact 1U-style "rack unit" view: photo of the current tone in an LCD-style
+// screen, name, gear chip, favorite buttons and an expand control. Shown by
+// shrinking the plugin window to kRackViewHeight; hidden by restoring it.
+class NAMRackViewControl : public IControl, public tonegallery::INowPlayingListener
+{
+public:
+  NAMRackViewControl(const IRECT& bounds, IFileDialogCompletionHandlerFunc loadModelFunc,
+                     IFileDialogCompletionHandlerFunc loadIRFunc)
+  : IControl(bounds)
+  , mLoadModelFunc(loadModelFunc)
+  , mLoadIRFunc(loadIRFunc)
+  {
+  }
+
+  void SetNowPlaying(const tonegallery::ToneEntry& entry, const std::string& modelPath,
+                     const std::string& irPath) override
+  {
+    mEntry = entry;
+    mHasEntry = true;
+    SetDirty(false);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const IColor accent = namtheme::Accent();
+    const IRECT face = mRECT;
+
+    // Faceplate with a subtle vertical sheen
+    g.PathRect(face);
+    g.PathFill(IPattern::CreateLinearGradient(
+      face.L, face.T, face.L, face.B,
+      {{IColor(255, 30, 31, 36), 0.0f}, {IColor(255, 20, 21, 25), 0.35f}, {IColor(255, 16, 17, 20), 1.0f}}));
+    g.FillRect(IColor(30, 255, 255, 255), face.GetFromTop(1.0f));
+    g.FillRect(COLOR_BLACK.WithOpacity(0.5f), face.GetFromBottom(2.0f));
+
+    // Rack ears + screws
+    for (int side = 0; side < 2; side++)
+    {
+      const IRECT ear = side == 0 ? face.GetFromLeft(26.0f) : face.GetFromRight(26.0f);
+      g.FillRect(IColor(255, 24, 25, 29), ear);
+      g.FillRect(IColor(20, 255, 255, 255), side == 0 ? ear.GetFromRight(1.0f) : ear.GetFromLeft(1.0f));
+      for (int screw = 0; screw < 2; screw++)
+      {
+        const IRECT sr = (screw == 0 ? ear.GetFromTop(30.0f) : ear.GetFromBottom(30.0f)).GetCentredInside(11.0f);
+        g.FillEllipse(IColor(255, 48, 50, 58), sr);
+        g.DrawEllipse(COLOR_BLACK.WithOpacity(0.6f), sr);
+        g.DrawLine(IColor(255, 90, 93, 104), sr.L + 2.0f, sr.MH(), sr.R - 2.0f, sr.MH(), nullptr, 1.4f);
+      }
+    }
+
+    // Power LED + branding
+    const IRECT brand = face.GetReducedFromLeft(38.0f).GetFromLeft(120.0f);
+    const IRECT led = IRECT(brand.L, face.MH() - 22.0f, brand.L + 10.0f, face.MH() - 12.0f);
+    g.PathCircle(led.MW(), led.MH(), 7.0f);
+    g.PathFill(IPattern::CreateRadialGradient(
+      led.MW(), led.MH(), 9.0f, {{accent.WithOpacity(0.55f), 0.0f}, {COLOR_TRANSPARENT, 1.0f}}));
+    g.FillEllipse(accent, led.GetCentredInside(7.0f));
+    const IText brandText(19.0f, namtheme::TEXT_MAIN, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    g.DrawText(brandText, "NAM", IRECT(brand.L + 16.0f, face.MH() - 26.0f, brand.R, face.MH() - 6.0f));
+    const IText subText(7.5f, namtheme::TEXT_FAINT, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    g.DrawText(subText, "TONE RACK UNIT", IRECT(brand.L, face.MH() - 2.0f, brand.R, face.MH() + 8.0f));
+
+    // LCD screen with the tone photo
+    const IRECT screen(face.L + 170.0f, face.T + 16.0f, face.L + 340.0f, face.B - 16.0f);
+    g.FillRoundRect(COLOR_BLACK, screen.GetPadded(4.0f), 6.0f);
+    g.DrawRoundRect(IColor(40, 255, 255, 255), screen.GetPadded(4.0f), 6.0f);
+    IBitmap* pBitmap = mHasEntry ? GetImage(mEntry.imagePath) : nullptr;
+    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0)
+    {
+      const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
+      const float areaAspect = screen.W() / screen.H();
+      IRECT cover = screen;
+      if (bmpAspect > areaAspect)
+        cover = screen.GetMidHPadded(0.5f * screen.H() * bmpAspect);
+      else
+        cover = screen.GetMidVPadded(0.5f * screen.W() / bmpAspect);
+      g.PathClipRegion(screen);
+      g.DrawFittedBitmap(*pBitmap, cover);
+      g.PathClipRegion();
+    }
+    else
+    {
+      g.FillRect(IColor(255, 10, 10, 13), screen);
+      const IText idleText(11.0f, accent.WithOpacity(0.7f), "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(idleText, "NO TONE LOADED", screen);
+    }
+
+    // Tone name + chip
+    const IRECT info(screen.R + 18.0f, face.T + 20.0f, face.R - 90.0f, face.B - 20.0f);
+    if (mHasEntry)
+    {
+      const IText nameText(15.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Top);
+      float y = info.T + 6.0f;
+      for (const auto& line : tonegallery::WrapLines(mEntry.name, 28, 2))
+      {
+        g.DrawText(nameText, line.c_str(), IRECT(info.L, y, info.R, y + 18.0f));
+        y += 18.0f;
+      }
+      const IColor gearColor = tonegallery::GearTypeColor(mEntry.gearType);
+      const char* gearLabel = tonegallery::GearTypeChipLabel(mEntry.gearType);
+      const float gw = 14.0f + 5.4f * (float)strlen(gearLabel);
+      const IRECT chip(info.L, y + 6.0f, info.L + gw, y + 22.0f);
+      g.FillRoundRect(gearColor, chip, 5.0f);
+      const IText chipText(8.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(chipText, gearLabel, chip);
+      if (!mEntry.author.empty())
+      {
+        const IText authorText(9.0f, namtheme::TEXT_DIM, "Inter-Regular", EAlign::Near, EVAlign::Middle);
+        g.DrawText(authorText, ("by " + mEntry.author).c_str(), IRECT(info.L + gw + 8.0f, y + 6.0f, info.R, y + 22.0f));
+      }
+    }
+    else
+    {
+      const IText hintText(10.0f, namtheme::TEXT_DIM, "Inter-Regular", EAlign::Near, EVAlign::Middle);
+      g.DrawText(hintText, "Load a tone, or tap 1 / 2 / 3", info.GetFromTop(40.0f));
+    }
+
+    // Favorite quick buttons
+    for (int i = 0; i < 3; i++)
+    {
+      const IRECT fav = FavRect(i);
+      const bool over = (i == mMouseOverFav);
+      g.FillEllipse(over ? accent.WithOpacity(0.35f) : IColor(255, 34, 35, 42), fav);
+      g.DrawEllipse(accent.WithOpacity(over ? 1.0f : 0.4f), fav);
+      const IText numText(9.0f, over ? COLOR_WHITE : namtheme::TEXT_DIM, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      const char num[2] = {(char)('1' + i), 0};
+      g.DrawText(numText, num, fav);
+    }
+
+    // Expand button
+    const IRECT expand = ExpandRect();
+    if (mMouseOverExpand)
+      g.FillRoundRect(PluginColors::MOUSEOVER, expand, 5.0f);
+    g.DrawRoundRect(namtheme::TEXT_DIM, expand.GetCentredInside(13.0f), 2.0f, nullptr, 1.4f);
+    const IRECT inner = expand.GetCentredInside(13.0f);
+    g.DrawLine(namtheme::TEXT_DIM, inner.L + 3.0f, inner.MH(), inner.R - 3.0f, inner.MH(), nullptr, 1.2f);
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (ExpandRect().Contains(x, y))
+    {
+      Hide(true);
+      GetUI()->Resize(PLUG_WIDTH, PLUG_HEIGHT, GetUI()->GetDrawScale());
+      return;
+    }
+    for (int i = 0; i < 3; i++)
+    {
+      if (FavRect(i).Contains(x, y))
+      {
+        const auto slots = tonegallery::LoadFavorites();
+        if (i < (int)slots.size() && !slots[i].empty())
+        {
+          try
+          {
+            const std::filesystem::path dir = tonegallery::GetToneLibraryRoot() / tonegallery::UTF8ToPath(slots[i]);
+            tonegallery::ToneEntry entry;
+            if (std::filesystem::exists(dir) && tonegallery::ScanToneFolder(dir, entry))
+            {
+              tonegallery::LoadToneEntryFiles(entry, mLoadModelFunc, mLoadIRFunc);
+              tonegallery::NotifyNowPlaying(GetUI(), entry, entry.modelPath, entry.irPath);
+            }
+          }
+          catch (const std::exception&)
+          {
+          }
+        }
+        return;
+      }
+    }
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    const bool overExpand = ExpandRect().Contains(x, y);
+    int overFav = -1;
+    for (int i = 0; i < 3; i++)
+      if (FavRect(i).Contains(x, y))
+        overFav = i;
+    if (overExpand != mMouseOverExpand || overFav != mMouseOverFav)
+    {
+      mMouseOverExpand = overExpand;
+      mMouseOverFav = overFav;
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    mMouseOverExpand = false;
+    mMouseOverFav = -1;
+    SetDirty(false);
+  }
+
+private:
+  IRECT ExpandRect() const { return mRECT.GetFromTRHC(56.0f, 46.0f).GetCentredInside(24.0f); }
+
+  IRECT FavRect(int i) const
+  {
+    const float size = 22.0f;
+    const float x = mRECT.R - 190.0f + i * 28.0f;
+    const float top = mRECT.B - 62.0f;
+    return IRECT(x, top, x + size, top + size);
+  }
+
+  IBitmap* GetImage(const std::string& path)
+  {
+    if (path.empty())
+      return nullptr;
+    auto found = mImageCache.find(path);
+    if (found != mImageCache.end())
+      return found->second.GetAPIBitmap() ? &found->second : nullptr;
+    IBitmap bitmap;
+    try
+    {
+      if (std::filesystem::exists(tonegallery::UTF8ToPath(path)))
+        bitmap = GetUI()->LoadBitmap(path.c_str());
+    }
+    catch (const std::exception&)
+    {
+    }
+    auto inserted = mImageCache.insert({path, bitmap});
+    return inserted.first->second.GetAPIBitmap() ? &inserted.first->second : nullptr;
+  }
+
+  tonegallery::ToneEntry mEntry;
+  bool mHasEntry = false;
+  bool mMouseOverExpand = false;
+  int mMouseOverFav = -1;
+  std::map<std::string, IBitmap> mImageCache;
+  IFileDialogCompletionHandlerFunc mLoadModelFunc;
+  IFileDialogCompletionHandlerFunc mLoadIRFunc;
+};
+
+// Titlebar button that switches into rack view.
+class NAMRackButtonControl : public IControl
+{
+public:
+  NAMRackButtonControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    SetTooltip("Rack view");
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    if (mMouseIsOver)
+      g.FillRoundRect(PluginColors::MOUSEOVER, mRECT, 4.0f);
+    const IRECT icon = mRECT.GetCentredInside(14.0f, 12.0f);
+    const IColor c = namtheme::TEXT_DIM;
+    g.DrawRoundRect(c, icon, 2.0f, nullptr, 1.4f);
+    g.DrawLine(c, icon.L + 2.0f, icon.MH(), icon.R - 2.0f, icon.MH(), nullptr, 1.2f);
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (IControl* pRack = GetUI()->GetControlWithTag(kCtrlTagRackView))
+    {
+      pRack->Hide(false);
+      GetUI()->Resize(PLUG_WIDTH, (int)kRackViewHeight, GetUI()->GetDrawScale());
+    }
+  }
 };
