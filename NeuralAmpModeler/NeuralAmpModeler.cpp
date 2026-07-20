@@ -82,6 +82,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 {
   _InitToneStack();
   nam::activations::Activation::enable_fast_tanh();
+  // Allow the editor to shrink down to rack-view height (the host clamps
+  // resize requests to these constraints).
+  SetSizeConstraints(PLUG_WIDTH, PLUG_WIDTH, (int)kRackViewHeight, PLUG_HEIGHT);
   GetParam(kInputLevel)->InitGain("Input", 0.0, -20.0, 20.0, 0.1);
   GetParam(kToneBass)->InitDouble("Bass", 5.0, 0.0, 10.0, 0.1);
   GetParam(kToneMid)->InitDouble("Middle", 5.0, 0.0, 10.0, 0.1);
