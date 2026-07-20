@@ -1769,7 +1769,12 @@ private:
     // Photo (cover-cropped into the top of the card)
     const IRECT photo = card.GetFromTop(kPhotoHeight).GetPadded(-1.5f);
     IBitmap* pBitmap = GetImage(entry.imagePath);
-    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0)
+    // NOTE: photo.Intersect(grid) is EMPTY when the photo is scrolled fully
+    // out of view, and an empty clip rect means "no clipping" -- which would
+    // splatter the full-size cover image over the whole UI. Only draw when
+    // the photo is actually (partly) visible.
+    const IRECT photoVis = photo.Intersect(grid);
+    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0 && photoVis.W() > 0.5f && photoVis.H() > 0.5f)
     {
       const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
       const float areaAspect = photo.W() / photo.H();
@@ -1778,7 +1783,7 @@ private:
         cover = photo.GetMidHPadded(0.5f * photo.H() * bmpAspect); // wider: overflow left/right
       else
         cover = photo.GetMidVPadded(0.5f * photo.W() / bmpAspect); // taller: overflow top/bottom
-      g.PathClipRegion(photo.Intersect(grid));
+      g.PathClipRegion(photoVis);
       g.DrawFittedBitmap(*pBitmap, cover);
       g.PathClipRegion(grid);
     }
