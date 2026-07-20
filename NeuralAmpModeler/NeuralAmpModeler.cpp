@@ -138,7 +138,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto meterBackgroundBitmap = pGraphics->LoadBitmap(METERBACKGROUND_FN);
 
     const auto b = pGraphics->GetBounds();
-    const auto mainArea = b.GetPadded(-20);
+    // Window regions: tone sidebar on the left, favorites bar under the main
+    // UI, and the stock 600x400 main UI in the remaining space (mainB).
+    const auto sidebarArea = b.GetFromLeft(kSidebarWidth);
+    const auto favoritesArea = b.GetReducedFromLeft(kSidebarWidth).GetFromBottom(kFavoritesBarHeight);
+    const auto mainB = b.GetReducedFromLeft(kSidebarWidth).GetReducedFromBottom(kFavoritesBarHeight);
+    const auto mainArea = mainB.GetPadded(-20);
     const auto contentArea = mainArea.GetPadded(-10);
     const auto titleHeight = 50.0f;
     const auto titleArea = contentArea.GetFromTop(titleHeight);
@@ -179,7 +184,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto outputMeterArea = contentArea.GetFromRight(30).GetHShifted(20).GetMidVPadded(100).GetVShifted(-25);
 
     // Misc Areas
-    const auto settingsButtonArea = CornerButtonArea(b);
+    const auto settingsButtonArea = CornerButtonArea(mainB);
 
     // Model loader button
     auto loadModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
@@ -215,8 +220,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       }
     };
 
-    pGraphics->AttachBackground(BACKGROUND_FN);
-    pGraphics->AttachControl(new IBitmapControl(b, linesBitmap));
+    // Dark panel behind everything; the stock textured background covers the
+    // main UI region at its native 600x400 size (no stretching).
+    pGraphics->AttachPanelBackground(IColor(255, 18, 18, 20));
+    pGraphics->AttachControl(new IBitmapControl(mainB, backgroundBitmap));
+    pGraphics->AttachControl(new IBitmapControl(mainB, linesBitmap));
     pGraphics->AttachControl(new IVLabelControl(titleArea, "NEURAL AMP MODELER", titleStyle));
     pGraphics->AttachControl(new ISVGControl(modelIconArea, modelIconSVG));
 
@@ -291,27 +299,35 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       },
       gearSVG));
 
+    // Tone sidebar (left) and favorites bar (bottom) - always visible.
+    pGraphics->AttachControl(
+      new NAMToneSidebarControl(sidebarArea, loadModelCompletionHandler, loadIRCompletionHandler), kCtrlTagToneSidebar);
+    pGraphics->AttachControl(
+      new NAMFavoritesBarControl(favoritesArea, loadModelCompletionHandler, loadIRCompletionHandler),
+      kCtrlTagFavoritesBar);
+
     // Tone Gallery (see NAMToneGalleryControl.h): opener button in the top-left
-    // corner, then the (initially hidden) full-window gallery overlay. A tile
-    // click goes through the same completion handlers as the file browsers.
+    // corner of the main UI, then the (initially hidden) gallery overlay. A
+    // tile click goes through the same completion handlers as the file
+    // browsers.
     const auto galleryButtonArea = mainArea.GetFromTLHC(50, 50).GetCentredInside(20, 20);
     pGraphics->AttachControl(new NAMGalleryButtonControl(galleryButtonArea, [pGraphics](IControl* pCaller) {
       pGraphics->GetControlWithTag(kCtrlTagToneGallery)->As<NAMToneGalleryPageControl>()->ShowAnimated();
     }));
     pGraphics
       ->AttachControl(new NAMToneGalleryPageControl(
-                        b, backgroundBitmap, crossSVG, style, loadModelCompletionHandler, loadIRCompletionHandler),
+                        mainB, backgroundBitmap, crossSVG, style, loadModelCompletionHandler, loadIRCompletionHandler),
                       kCtrlTagToneGallery)
       ->Hide(true);
 
     pGraphics
-      ->AttachControl(new NAMSettingsPageControl(b, backgroundBitmap, inputLevelBackgroundBitmap, switchHandleBitmap,
-                                                 crossSVG, style, radioButtonStyle),
+      ->AttachControl(new NAMSettingsPageControl(mainB, backgroundBitmap, inputLevelBackgroundBitmap,
+                                                 switchHandleBitmap, crossSVG, style, radioButtonStyle),
                       kCtrlTagSettingsBox)
       ->Hide(true);
 
-    const auto slimKnobArea = b.GetCentredInside(100.f, NAM_KNOB_HEIGHT + 24.f);
-    pGraphics->AttachControl(new NAMSlimOverlayBackdropControl(b, hideSlimOverlay), kCtrlTagSlimOverlayBackdrop)
+    const auto slimKnobArea = mainB.GetCentredInside(100.f, NAM_KNOB_HEIGHT + 24.f);
+    pGraphics->AttachControl(new NAMSlimOverlayBackdropControl(mainB, hideSlimOverlay), kCtrlTagSlimOverlayBackdrop)
       ->Hide(true);
     pGraphics
       ->AttachControl(new NAMKnobControl(slimKnobArea, kSlim, "Slim", style, knobBackgroundBitmap), kCtrlTagSlimKnob)
