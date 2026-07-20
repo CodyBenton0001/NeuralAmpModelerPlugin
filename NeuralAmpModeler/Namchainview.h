@@ -76,6 +76,7 @@ public:
     if (ExpandRect().Contains(x, y))
     {
       PLUG()->mToneChainMode = false;
+      PLUG()->mChainEditSlot = -1;
       Hide(true);
       GetUI()->Resize(PLUG_WIDTH, PLUG_HEIGHT, GetUI()->GetDrawScale());
       return;
@@ -103,10 +104,23 @@ public:
       }
       if (ChooseRect(i).Contains(x, y))
       {
-        OpenTonePicker(i, x, y);
+        EnterEditMode(i);
         return;
       }
     }
+  }
+
+  // Jump to the full main view to choose/edit this unit's tone. The load
+  // handlers on the plugin route into the unit while mChainEditSlot is set,
+  // and the banner strip brings the user back here when they're done.
+  void EnterEditMode(int unit)
+  {
+    PLUG()->mChainEditSlot = unit;
+    PLUG()->mToneChainMode = false;
+    Hide(true);
+    if (IControl* pBanner = GetUI()->GetControlWithTag(kCtrlTagChainBanner))
+      pBanner->Hide(false);
+    GetUI()->Resize(PLUG_WIDTH, PLUG_HEIGHT, GetUI()->GetDrawScale());
   }
 
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
@@ -173,39 +187,6 @@ public:
     mMouseOverChoose = -1;
     mMouseOverLED = -1;
     mMouseOverClear = -1;
-    SetDirty(false);
-  }
-
-  void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
-  {
-    if (pSelectedMenu == nullptr || pSelectedMenu->GetChosenItem() == nullptr)
-      return;
-    const int idx = pSelectedMenu->GetChosenItemIdx();
-    if (idx < 0 || idx >= (int)mMenuEntries.size() || mMenuSlot < 0)
-      return;
-    const tonegallery::ToneEntry entry = mMenuEntries[idx];
-    if (entry.directory.empty())
-      return; // separator placeholder
-    if (mMenuSlot == 0)
-    {
-      tonegallery::LoadToneEntryFiles(entry, mLoadModelFunc, mLoadIRFunc);
-      tonegallery::NotifyNowPlaying(GetUI(), entry, entry.modelPath, entry.irPath);
-      PLUG()->mChainMainEnabled = true;
-    }
-    else
-    {
-      const int slot = mMenuSlot - 1;
-      // Same gear-type rules as the sidebar loader: IR-only tones load just
-      // the IR; amp-only tones don't drag a stray wav along.
-      const bool useModel = entry.gearType != tonegallery::GearType::IR;
-      const bool useIR = entry.gearType == tonegallery::GearType::IR || entry.gearType == tonegallery::GearType::AmpCab;
-      PLUG()->SetChainTone(
-        slot, useModel ? entry.modelPath.c_str() : "", useIR ? entry.irPath.c_str() : "", entry.directory.c_str());
-      PLUG()->mChainSlots[slot].enabled = true;
-      mSlotCacheKey[slot].clear(); // force a re-read of the tone folder
-      mSlotCacheValid[slot] = false;
-    }
-    mMenuSlot = -1;
     SetDirty(false);
   }
 
@@ -520,57 +501,6 @@ private:
     }
   }
 
-  // --- Tone picker ---------------------------------------------------------
-  void OpenTonePicker(int unit, float x, float y)
-  {
-    mMenu.Clear();
-    mMenuEntries.clear();
-    mMenuSlot = unit;
-
-    std::vector<tonegallery::ToneEntry> entries;
-    try
-    {
-      entries = tonegallery::ScanToneLibrary(tonegallery::GetToneLibraryRoot());
-    }
-    catch (const std::exception&)
-    {
-    }
-    if (entries.empty())
-    {
-      mMenu.AddItem("(your tone library is empty)", -1, IPopupMenu::Item::kDisabled);
-      mMenuEntries.push_back(tonegallery::ToneEntry());
-    }
-    else
-    {
-      const tonegallery::GearType order[] = {tonegallery::GearType::AmpCab, tonegallery::GearType::Amp,
-                                             tonegallery::GearType::IR, tonegallery::GearType::Pedal,
-                                             tonegallery::GearType::Other};
-      bool first = true;
-      for (tonegallery::GearType gt : order)
-      {
-        bool headerAdded = false;
-        for (const auto& e : entries)
-        {
-          if (e.gearType != gt)
-            continue;
-          if (!headerAdded)
-          {
-            if (!first)
-            {
-              mMenu.AddSeparator();
-              mMenuEntries.push_back(tonegallery::ToneEntry());
-            }
-            first = false;
-            headerAdded = true;
-          }
-          mMenu.AddItem(e.name.c_str());
-          mMenuEntries.push_back(e);
-        }
-      }
-    }
-    GetUI()->CreatePopupMenu(*this, mMenu, IRECT(x, y, x, y));
-  }
-
   IBitmap* GetImage(const std::string& path)
   {
     if (path.empty())
@@ -597,9 +527,6 @@ private:
   std::string mSlotCacheKey[3];
   bool mSlotCacheValid[3] = {false, false, false};
   std::map<std::string, IBitmap> mImageCache;
-  IPopupMenu mMenu;
-  std::vector<tonegallery::ToneEntry> mMenuEntries;
-  int mMenuSlot = -1;
   int mDragUnit = -1;
   bool mMouseOverExpand = false;
   int mMouseOverChoose = -1;
@@ -607,6 +534,67 @@ private:
   int mMouseOverClear = -1;
   IFileDialogCompletionHandlerFunc mLoadModelFunc;
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
+};
+
+// The strip shown across the top of the main view while a chain unit's tone
+// is being chosen: "EDITING RACK UNIT n ... DONE". Clicking it (or the DONE
+// side) returns to the stacked chain view.
+class NAMChainEditBannerControl : public IControl
+{
+public:
+  NAMChainEditBannerControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    SetTooltip("Done - back to the rack");
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const IColor accent = namtheme::Accent();
+    const int unit = PLUG()->mChainEditSlot;
+    if (unit < 0)
+      return;
+
+    // Bar
+    g.FillRect(accent.WithOpacity(mMouseIsOver ? 0.32f : 0.22f), mRECT);
+    g.FillRect(accent, mRECT.GetFromBottom(2.0f));
+
+    // Pulsing-ish label
+    const IText labelText(10.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    char label[64];
+    if (unit == 0)
+      snprintf(label, sizeof(label), "EDITING RACK UNIT 1 - pick a tone anywhere");
+    else
+      snprintf(label, sizeof(label), "EDITING RACK UNIT %d - pick a tone anywhere", unit + 1);
+    g.DrawText(labelText, label, mRECT.GetReducedFromLeft(14.0f));
+
+    // DONE button (right)
+    const IRECT done = mRECT.GetFromRight(130.0f);
+    const IText doneText(10.0f, mMouseIsOver ? COLOR_WHITE : accent, "Inter-Bold", EAlign::Far, EVAlign::Middle);
+    g.DrawText(doneText, "DONE - BACK TO RACK", done.GetReducedFromRight(14.0f));
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    PLUG()->mChainEditSlot = -1;
+    PLUG()->mToneChainMode = true;
+    Hide(true);
+    if (IControl* pChain = GetUI()->GetControlWithTag(kCtrlTagChainView))
+      pChain->Hide(false);
+    GetUI()->Resize(PLUG_WIDTH, (int)kChainViewHeight, GetUI()->GetDrawScale());
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    SetDirty(false);
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    SetDirty(false);
+  }
 };
 
 // Titlebar button that switches into the stacked chain view.
@@ -638,8 +626,11 @@ public:
     {
       PLUG()->mToneChainMode = true;
       PLUG()->mToneRackMode = false;
+      PLUG()->mChainEditSlot = -1;
       if (IControl* pRack = GetUI()->GetControlWithTag(kCtrlTagRackView))
         pRack->Hide(true);
+      if (IControl* pBanner = GetUI()->GetControlWithTag(kCtrlTagChainBanner))
+        pBanner->Hide(true);
       pChain->Hide(false);
       GetUI()->Resize(PLUG_WIDTH, (int)kChainViewHeight, GetUI()->GetDrawScale());
     }
