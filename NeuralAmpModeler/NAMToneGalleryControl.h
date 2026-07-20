@@ -45,6 +45,24 @@ const int kCtrlTagToneGallery = 1001;
 namespace tonegallery
 {
 
+// UTF-8 <-> std::filesystem::path helpers that compile under both C++17 and
+// C++20. (In C++20, path::u8string() returns std::u8string -- a different
+// character type -- and std::filesystem::u8path is deprecated.)
+inline std::string PathToUTF8(const std::filesystem::path& p)
+{
+  const auto s = p.u8string();
+  return std::string(s.begin(), s.end());
+}
+
+inline std::filesystem::path UTF8ToPath(const std::string& s)
+{
+#if defined(__cpp_char8_t)
+  return std::filesystem::path(std::u8string(s.begin(), s.end()));
+#else
+  return std::filesystem::u8path(s);
+#endif
+}
+
 enum class GearType
 {
   Amp = 0,
@@ -119,7 +137,7 @@ inline std::filesystem::path GetHomeDir()
 #else
   const char* home = std::getenv("HOME");
 #endif
-  return home ? std::filesystem::path(std::filesystem::u8path(home)) : std::filesystem::path();
+  return home ? UTF8ToPath(std::string(home)) : std::filesystem::path();
 }
 
 // Root of the tone library. Default: <home>/Documents/NAM Tones
@@ -145,7 +163,7 @@ inline std::filesystem::path GetToneLibraryRoot()
         line.erase(line.begin(), std::find_if(line.begin(), line.end(), NotSpace));
         line.erase(std::find_if(line.rbegin(), line.rend(), NotSpace).base(), line.end());
         if (!line.empty())
-          return fs::u8path(line);
+          return UTF8ToPath(line);
       }
     }
   }
@@ -158,7 +176,7 @@ inline std::filesystem::path GetToneLibraryRoot()
 
 inline bool HasExtension(const std::filesystem::path& p, const char* extLower)
 {
-  std::string e = p.extension().u8string();
+  std::string e = PathToUTF8(p.extension());
   std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return (char)std::tolower(c); });
   return e == extLower;
 }
@@ -169,8 +187,8 @@ inline bool ScanToneFolder(const std::filesystem::path& dir, ToneEntry& entry)
 {
   namespace fs = std::filesystem;
   entry = ToneEntry();
-  entry.directory = dir.u8string();
-  entry.name = dir.filename().u8string();
+  entry.directory = PathToUTF8(dir);
+  entry.name = PathToUTF8(dir.filename());
 
   std::vector<fs::path> namFiles, wavFiles, imageFiles;
   try
@@ -226,14 +244,14 @@ inline bool ScanToneFolder(const std::filesystem::path& dir, ToneEntry& entry)
           if (t.is_string())
             entry.tags.push_back(t.get<std::string>());
       const std::string image = GetStr("image");
-      if (!image.empty() && fs::exists(dir / fs::u8path(image)))
-        entry.imagePath = (dir / fs::u8path(image)).u8string();
+      if (!image.empty() && fs::exists(dir / UTF8ToPath(image)))
+        entry.imagePath = PathToUTF8(dir / UTF8ToPath(image));
       const std::string model = GetStr("model");
-      if (!model.empty() && fs::exists(dir / fs::u8path(model)))
-        entry.modelPath = (dir / fs::u8path(model)).u8string();
+      if (!model.empty() && fs::exists(dir / UTF8ToPath(model)))
+        entry.modelPath = PathToUTF8(dir / UTF8ToPath(model));
       const std::string ir = GetStr("ir");
-      if (!ir.empty() && fs::exists(dir / fs::u8path(ir)))
-        entry.irPath = (dir / fs::u8path(ir)).u8string();
+      if (!ir.empty() && fs::exists(dir / UTF8ToPath(ir)))
+        entry.irPath = PathToUTF8(dir / UTF8ToPath(ir));
     }
     catch (const std::exception&)
     {
@@ -243,11 +261,11 @@ inline bool ScanToneFolder(const std::filesystem::path& dir, ToneEntry& entry)
 
   // Fill in anything the metadata didn't provide.
   if (entry.imagePath.empty() && !imageFiles.empty())
-    entry.imagePath = imageFiles.front().u8string();
+    entry.imagePath = PathToUTF8(imageFiles.front());
   if (entry.modelPath.empty() && !namFiles.empty())
-    entry.modelPath = namFiles.front().u8string();
+    entry.modelPath = PathToUTF8(namFiles.front());
   if (entry.irPath.empty() && !wavFiles.empty())
-    entry.irPath = wavFiles.front().u8string();
+    entry.irPath = PathToUTF8(wavFiles.front());
   if (!haveGearType)
   {
     if (!entry.modelPath.empty() && !entry.irPath.empty())
@@ -602,7 +620,7 @@ private:
     IBitmap bitmap;
     try
     {
-      if (std::filesystem::exists(std::filesystem::u8path(path)))
+      if (std::filesystem::exists(tonegallery::UTF8ToPath(path)))
         bitmap = GetUI()->LoadBitmap(path.c_str());
     }
     catch (const std::exception&)
@@ -753,7 +771,7 @@ public:
     const std::filesystem::path root = tonegallery::GetToneLibraryRoot();
     auto entries = tonegallery::ScanToneLibrary(root);
     if (auto* pGrid = GetGrid())
-      pGrid->SetEntries(std::move(entries), root.u8string());
+      pGrid->SetEntries(std::move(entries), tonegallery::PathToUTF8(root));
   }
 
   void OnAttached() override
@@ -786,7 +804,7 @@ public:
     const auto folderButtonArea = GetRECT().GetPadded(-pad).GetFromBLHC(120.0f, 20.0f);
     const IText linkText(13.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
     auto openFolderAction = [](IControl* pCaller) {
-      const std::string root = tonegallery::GetToneLibraryRoot().u8string();
+      const std::string root = tonegallery::PathToUTF8(tonegallery::GetToneLibraryRoot());
       if (!root.empty())
         pCaller->GetUI()->OpenURL(root.c_str());
     };
