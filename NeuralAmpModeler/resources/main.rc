@@ -71,7 +71,6 @@ FONT 8, "MS Sans Serif"
 BEGIN
 END
 
-
 /////////////////////////////////////////////////////////////////////////////
 //
 // Menu
@@ -98,7 +97,6 @@ BEGIN
     END
 END
 
-
 /////////////////////////////////////////////////////////////////////////////
 //
 // DESIGNINFO
@@ -117,7 +115,6 @@ BEGIN
 END
 #endif    // APSTUDIO_INVOKED
 
-
 /////////////////////////////////////////////////////////////////////////////
 //
 // AFX_DIALOG_LAYOUT
@@ -128,29 +125,30 @@ BEGIN
     0
 END
 
-
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
 //
 // TEXTINCLUDE
 //
 
-1 TEXTINCLUDE 
+1 TEXTINCLUDE
 BEGIN
     "resource.h\0"
 END
 
-2 TEXTINCLUDE 
+2 TEXTINCLUDE
 BEGIN
     "#include ""winres.h""\r\n"
     "\0"
 END
 
-3 TEXTINCLUDE 
+3 TEXTINCLUDE
 BEGIN
     "#include ""..\\config.h""\r\n"
     "ROBOTO_FN TTF ROBOTO_FN\r\n"
     "MICHROMA_FN TTF MICHROMA_FN\r\n"
+    "INTER_FN TTF INTER_FN\r\n"
+    "INTER_BOLD_FN TTF INTER_BOLD_FN\r\n"
     "FILE_FN SVG FILE_FN\r\n"
     "GEAR_FN SVG GEAR_FN\r\n"
     "GLOBE_ICON_FN SVG GLOBE_ICON_FN\r\n"
@@ -186,7 +184,6 @@ END
 
 #endif    // APSTUDIO_INVOKED
 
-
 /////////////////////////////////////////////////////////////////////////////
 //
 // Icon
@@ -195,7 +192,6 @@ END
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 IDI_ICON1               ICON                    "NeuralAmpModeler.ico"
-
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -210,7 +206,6 @@ BEGIN
     "F",            ID_SHOW_FPS,            VIRTKEY, CONTROL, NOINVERT
     "E",            ID_LIVE_EDIT,           VIRTKEY, CONTROL, NOINVERT
 END
-
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -253,8 +248,6 @@ END
 #endif    // English (United Kingdom) resources
 /////////////////////////////////////////////////////////////////////////////
 
-
-
 #ifndef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -263,6 +256,8 @@ END
 #include "..\config.h"
 ROBOTO_FN TTF ROBOTO_FN
 MICHROMA_FN TTF MICHROMA_FN
+INTER_FN TTF INTER_FN
+INTER_BOLD_FN TTF INTER_BOLD_FN
 FILE_FN SVG FILE_FN
 GEAR_FN SVG GEAR_FN
 GLOBE_ICON_FN SVG GLOBE_ICON_FN
@@ -296,4 +291,3 @@ METERBACKGROUND2X_FN PNG METERBACKGROUND2X_FN
 METERBACKGROUND3X_FN PNG METERBACKGROUND3X_FN
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
-
