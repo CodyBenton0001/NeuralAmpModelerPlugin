@@ -564,6 +564,64 @@ private:
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
 };
 
+// Titlebar button that cycles the UI scale (100% -> 125% -> ... -> 200%).
+// At 200% the standalone app fills most of a 1080p+ screen. Right-click
+// resets to 100%. The scale is remembered in theme.json.
+class NAMZoomButtonControl : public IControl
+{
+public:
+  NAMZoomButtonControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    SetTooltip("Window size: click to grow, right-click for 100%");
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    if (mMouseIsOver)
+      g.FillRoundRect(PluginColors::MOUSEOVER, mRECT, 4.0f);
+    const IColor c = mMouseIsOver ? COLOR_WHITE : namtheme::TEXT_DIM;
+    const IRECT icon = mRECT.GetCentredInside(13.0f);
+    // Two outward arrows (expand)
+    g.DrawLine(c, icon.L, icon.T + 4.0f, icon.L, icon.T, nullptr, 1.4f);
+    g.DrawLine(c, icon.L, icon.T, icon.L + 4.0f, icon.T, nullptr, 1.4f);
+    g.DrawLine(c, icon.L, icon.T, icon.L + 5.0f, icon.T + 5.0f, nullptr, 1.4f);
+    g.DrawLine(c, icon.R - 4.0f, icon.B, icon.R, icon.B, nullptr, 1.4f);
+    g.DrawLine(c, icon.R, icon.B - 4.0f, icon.R, icon.B, nullptr, 1.4f);
+    g.DrawLine(c, icon.R - 5.0f, icon.B - 5.0f, icon.R, icon.B, nullptr, 1.4f);
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (mod.R)
+    {
+      ApplyScale(1.0);
+      return;
+    }
+    static const double kScales[] = {1.0, 1.25, 1.5, 1.75, 2.0};
+    const double cur = GetUI()->GetDrawScale();
+    int idx = 0;
+    double best = 1e9;
+    for (int i = 0; i < 5; i++)
+    {
+      const double d = std::abs(kScales[i] - cur);
+      if (d < best)
+      {
+        best = d;
+        idx = i;
+      }
+    }
+    ApplyScale(kScales[(idx + 1) % 5]);
+  }
+
+private:
+  void ApplyScale(double s)
+  {
+    GetUI()->Resize(GetUI()->Width(), GetUI()->Height(), (float)s);
+    tonegallery::SaveUIScale(s);
+  }
+};
+
 // Titlebar button that switches into rack view.
 class NAMRackButtonControl : public IControl
 {
