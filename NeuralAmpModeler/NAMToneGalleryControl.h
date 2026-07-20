@@ -490,9 +490,8 @@ public:
   {
     const IColor active = PluginColors::NAM_THEMECOLOR;
     const IColor inactive = PluginColors::NAM_THEMECOLOR.WithOpacity(0.15f);
-    const IText activeText(11.0f, COLOR_BLACK, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
-    const IText inactiveText(
-      11.0f, PluginColors::NAM_THEMEFONTCOLOR, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    const IText activeText(11.0f, COLOR_BLACK, "Inter-Regular", EAlign::Center, EVAlign::Middle);
+    const IText inactiveText(11.0f, PluginColors::NAM_THEMEFONTCOLOR, "Inter-Regular", EAlign::Center, EVAlign::Middle);
 
     for (int i = 0; i < tonegallery::kNumFilters; i++)
     {
@@ -593,7 +592,7 @@ public:
 
     if (mFiltered.empty())
     {
-      const IText msgText(15.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      const IText msgText(15.0f, PluginColors::HELP_TEXT, "Inter-Regular", EAlign::Center, EVAlign::Middle);
       std::string msg;
       if (mEntries.empty())
         msg = std::string("No tones found.\nPut tone folders in: ") + mLibraryRoot
@@ -772,18 +771,18 @@ private:
     {
       g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.08f), imageArea, 4.0f);
       const IText placeholderText(
-        24.0f, PluginColors::NAM_THEMECOLOR.WithOpacity(0.6f), "Michroma-Regular", EAlign::Center, EVAlign::Middle);
+        24.0f, PluginColors::NAM_THEMECOLOR.WithOpacity(0.6f), "Inter-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(placeholderText, "NAM", imageArea);
     }
 
     // Name
     const IRECT nameArea = tile.GetReducedFromTop(kImageHeight).GetFromTop(20.0f).GetHPadded(-6.0f);
-    const IText nameText(14.0f, COLOR_WHITE, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    const IText nameText(14.0f, COLOR_WHITE, "Inter-Regular", EAlign::Near, EVAlign::Middle);
     g.DrawText(nameText, Ellipsize(entry.name, 24).c_str(), nameArea);
 
     // Author + gear chip row
     const IRECT infoArea = tile.GetFromBottom(24.0f).GetPadded(-6.0f);
-    const IText authorText(11.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    const IText authorText(11.0f, PluginColors::HELP_TEXT, "Inter-Regular", EAlign::Near, EVAlign::Middle);
     if (!entry.author.empty())
       g.DrawText(authorText, Ellipsize("by " + entry.author, 18).c_str(), infoArea.GetReducedFromRight(64.0f));
 
@@ -792,7 +791,7 @@ private:
     const IColor chipColor = tonegallery::GearTypeColor(entry.gearType);
     g.FillRoundRect(chipColor.WithOpacity(0.25f), chipArea, 6.0f);
     g.DrawRoundRect(chipColor, chipArea, 6.0f);
-    const IText chipText(10.0f, chipColor.WithContrast(0.3f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    const IText chipText(10.0f, chipColor.WithContrast(0.3f), "Inter-Regular", EAlign::Center, EVAlign::Middle);
     g.DrawText(chipText, tonegallery::GearTypeChipLabel(entry.gearType), chipArea);
 
     // Hover outline
@@ -882,7 +881,7 @@ public:
       // Numbered badge
       const IRECT badge = slot.GetFromLeft(slot.H()).GetCentredInside(18.0f);
       g.FillEllipse(valid ? accent : accent.WithOpacity(0.25f), badge);
-      const IText badgeText(11.0f, COLOR_BLACK, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      const IText badgeText(11.0f, COLOR_BLACK, "Inter-Regular", EAlign::Center, EVAlign::Middle);
       const char num[2] = {(char)('1' + i), 0};
       g.DrawText(badgeText, num, badge);
 
@@ -890,12 +889,12 @@ public:
       const IRECT labelArea = slot.GetReducedFromLeft(slot.H() * 0.85f).GetReducedFromRight(8.0f);
       if (valid)
       {
-        const IText nameText(12.0f, COLOR_WHITE, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+        const IText nameText(12.0f, COLOR_WHITE, "Inter-Regular", EAlign::Near, EVAlign::Middle);
         g.DrawText(nameText, tonegallery::Ellipsize(mSlotEntries[i].name, 22).c_str(), labelArea);
       }
       else
       {
-        const IText emptyText(10.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+        const IText emptyText(10.0f, PluginColors::HELP_TEXT, "Inter-Regular", EAlign::Near, EVAlign::Middle);
         g.DrawText(emptyText, "Empty - right-click a tone", labelArea);
       }
     }
@@ -981,13 +980,19 @@ private:
 // The always-visible tone list on the left of the main UI. Click to load,
 // right-click to add to a favorite slot, mouse wheel to scroll. The circular
 // arrow at the top rescans the library folder.
+// The always-visible tone browser on the left: category chips up top, then a
+// two-column grid of tone cards (photo, name, description, tags). Click to
+// load, right-click to assign a favorite slot, mouse wheel to scroll.
 class NAMToneSidebarControl : public IControl
 {
 public:
   static constexpr float kHeaderHeight = 46.0f;
   static constexpr float kFilterAreaHeight = 50.0f;
-  static constexpr float kRowHeight = 34.0f;
   static constexpr float kChipHeight = 18.0f;
+  static constexpr int kNumCols = 2;
+  static constexpr float kCardGap = 6.0f;
+  static constexpr float kCardHeight = 124.0f;
+  static constexpr float kPhotoHeight = 54.0f;
 
   NAMToneSidebarControl(const IRECT& bounds, IFileDialogCompletionHandlerFunc loadModelFunc,
                         IFileDialogCompletionHandlerFunc loadIRFunc)
@@ -1013,26 +1018,26 @@ public:
         mFiltered.push_back(i);
     if (mScroll > MaxScroll())
       mScroll = MaxScroll();
-    mMouseOverRow = -1;
+    mMouseOverCard = -1;
     SetDirty(false);
   }
 
   void Draw(IGraphics& g) override
   {
     // Panel
-    g.FillRect(IColor(255, 24, 24, 27), mRECT);
-    g.FillRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.25f), mRECT.GetFromRight(1.0f));
+    g.FillRect(IColor(255, 23, 24, 28), mRECT);
+    g.FillRect(IColor(18, 255, 255, 255), mRECT.GetFromRight(1.0f));
 
     // Header
     const IRECT header = mRECT.GetFromTop(kHeaderHeight);
-    const IText titleText(12.0f, COLOR_WHITE, "Michroma-Regular", EAlign::Near, EVAlign::Middle);
+    const IText titleText(11.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Middle);
     g.DrawText(titleText, "TONE LIBRARY", header.GetReducedFromLeft(12.0f).GetFromTop(28.0f));
     std::stringstream count;
     if (mFilter == tonegallery::kFilterAll)
       count << mEntries.size() << (mEntries.size() == 1 ? " tone" : " tones");
     else
       count << mFiltered.size() << " of " << mEntries.size() << (mEntries.size() == 1 ? " tone" : " tones");
-    const IText countText(10.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    const IText countText(9.0f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Middle);
     g.DrawText(countText, count.str().c_str(), header.GetReducedFromLeft(12.0f).GetFromBottom(16.0f));
 
     // Refresh icon (circular arrow)
@@ -1044,56 +1049,53 @@ public:
     g.FillTriangle(iconColor, cx + 1.5f, cy - r - 3.0f, cx + 7.5f, cy - r + 0.5f, cx + 1.5f, cy - r + 4.0f);
 
     // Category chips
-    const IText chipTextActive(9.5f, COLOR_BLACK, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
-    const IText chipTextInactive(
-      9.5f, PluginColors::NAM_THEMEFONTCOLOR, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    const IText chipTextActive(9.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    const IText chipTextInactive(9.0f, PluginColors::NAM_THEMEFONTCOLOR, "Inter-Bold", EAlign::Center, EVAlign::Middle);
     for (int i = 0; i < tonegallery::kNumFilters; i++)
     {
       const IRECT chip = ChipRect(i);
       const bool isActive = (i == mFilter);
       const bool isOver = (i == mMouseOverChip);
-      g.FillRoundRect(isActive ? PluginColors::NAM_THEMECOLOR : PluginColors::NAM_THEMECOLOR.WithOpacity(0.12f), chip,
-                      chip.H() * 0.5f);
+      g.FillRoundRect(isActive ? PluginColors::NAM_THEMECOLOR : IColor(13, 255, 255, 255), chip, chip.H() * 0.5f);
       if (isOver && !isActive)
         g.FillRoundRect(PluginColors::MOUSEOVER, chip, chip.H() * 0.5f);
       g.DrawText(isActive ? chipTextActive : chipTextInactive, tonegallery::FilterLabel(i), chip);
     }
-    g.FillRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.2f),
-               mRECT.GetFromTop(kHeaderHeight + kFilterAreaHeight).GetFromBottom(1.0f));
+    g.FillRect(IColor(18, 255, 255, 255), mRECT.GetFromTop(kHeaderHeight + kFilterAreaHeight).GetFromBottom(1.0f));
 
-    // Rows
-    const IRECT rows = RowsArea();
-    g.PathClipRegion(rows);
+    // Cards
+    const IRECT grid = GridArea();
+    g.PathClipRegion(grid);
     if (mFiltered.empty())
     {
-      const IText msgText(11.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      const IText msgText(10.0f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Center, EVAlign::Middle);
       if (mEntries.empty())
       {
-        g.DrawText(msgText, "No tones yet.", rows.GetFromTop(60.0f).GetVShifted(10.0f));
-        g.DrawText(msgText, "Use the Add-Tone helper,", rows.GetFromTop(60.0f).GetVShifted(26.0f));
-        g.DrawText(msgText, "then click the arrow above.", rows.GetFromTop(60.0f).GetVShifted(42.0f));
+        g.DrawText(msgText, "No tones yet.", grid.GetFromTop(60.0f).GetVShifted(10.0f));
+        g.DrawText(msgText, "Use the Add-Tone helper,", grid.GetFromTop(60.0f).GetVShifted(26.0f));
+        g.DrawText(msgText, "then click the arrow above.", grid.GetFromTop(60.0f).GetVShifted(42.0f));
       }
       else
       {
-        g.DrawText(msgText, "No tones in this category.", rows.GetFromTop(40.0f).GetVShifted(10.0f));
+        g.DrawText(msgText, "No tones in this category.", grid.GetFromTop(40.0f).GetVShifted(10.0f));
       }
     }
     for (int i = 0; i < (int)mFiltered.size(); i++)
     {
-      const IRECT row = RowRect(i);
-      if (row.B < rows.T || row.T > rows.B)
+      const IRECT card = CardRect(i);
+      if (card.B < grid.T || card.T > grid.B)
         continue;
-      DrawRow(g, mEntries[mFiltered[i]], row, i == mMouseOverRow);
+      DrawCard(g, mEntries[mFiltered[i]], card, i == mMouseOverCard, grid);
     }
     // Scrollbar
-    const float contentH = (float)mFiltered.size() * kRowHeight;
-    if (contentH > rows.H())
+    const float contentH = ContentHeight();
+    if (contentH > grid.H())
     {
-      const float frac = rows.H() / contentH;
-      const float barH = std::max(20.0f, frac * rows.H());
-      const float travel = rows.H() - barH;
-      const float pos = (mScroll / (contentH - rows.H())) * travel;
-      const IRECT bar(rows.R - 3.0f, rows.T + pos, rows.R - 1.0f, rows.T + pos + barH);
+      const float frac = grid.H() / contentH;
+      const float barH = std::max(20.0f, frac * grid.H());
+      const float travel = grid.H() - barH;
+      const float pos = (mScroll / (contentH - grid.H())) * travel;
+      const IRECT bar(mRECT.R - 4.0f, grid.T + pos, mRECT.R - 2.0f, grid.T + pos + barH);
       g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.5f), bar, 1.0f);
     }
     g.PathClipRegion();
@@ -1119,12 +1121,12 @@ public:
         return;
       }
     }
-    const int idx = RowAt(x, y);
+    const int idx = CardAt(x, y);
     if (idx < 0)
       return;
     if (mod.R)
     {
-      mMenuRowIdx = mFiltered[idx];
+      mMenuEntryIdx = mFiltered[idx];
       mMenu.Clear();
       mMenu.AddItem("Add to Favorite 1");
       mMenu.AddItem("Add to Favorite 2");
@@ -1140,20 +1142,20 @@ public:
     if (pSelectedMenu == nullptr || pSelectedMenu->GetChosenItem() == nullptr)
       return;
     const int slotIdx = pSelectedMenu->GetChosenItemIdx();
-    if (mMenuRowIdx >= 0 && mMenuRowIdx < (int)mEntries.size() && slotIdx >= 0)
+    if (mMenuEntryIdx >= 0 && mMenuEntryIdx < (int)mEntries.size() && slotIdx >= 0)
     {
       const std::string folderName =
-        tonegallery::PathToUTF8(tonegallery::UTF8ToPath(mEntries[mMenuRowIdx].directory).filename());
+        tonegallery::PathToUTF8(tonegallery::UTF8ToPath(mEntries[mMenuEntryIdx].directory).filename());
       if (auto* pFav = GetUI()->GetControlWithTag(kCtrlTagFavoritesBar))
         pFav->As<NAMFavoritesBarControl>()->AssignSlot(slotIdx, folderName);
     }
-    mMenuRowIdx = -1;
+    mMenuEntryIdx = -1;
   }
 
   void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
   {
     const float maxScroll = MaxScroll();
-    const float next = std::min(maxScroll, std::max(0.0f, mScroll - d * 40.0f));
+    const float next = std::min(maxScroll, std::max(0.0f, mScroll - d * 44.0f));
     if (next != mScroll)
     {
       mScroll = next;
@@ -1169,10 +1171,10 @@ public:
     for (int i = 0; i < tonegallery::kNumFilters; i++)
       if (ChipRect(i).Contains(x, y))
         overChip = i;
-    const int idx = RowAt(x, y);
-    if (idx != mMouseOverRow || overRefresh != mMouseOverRefresh || overChip != mMouseOverChip)
+    const int idx = CardAt(x, y);
+    if (idx != mMouseOverCard || overRefresh != mMouseOverRefresh || overChip != mMouseOverChip)
     {
-      mMouseOverRow = idx;
+      mMouseOverCard = idx;
       mMouseOverRefresh = overRefresh;
       mMouseOverChip = overChip;
       if (overRefresh)
@@ -1189,16 +1191,26 @@ public:
   void OnMouseOut() override
   {
     IControl::OnMouseOut();
-    mMouseOverRow = -1;
+    mMouseOverCard = -1;
     mMouseOverRefresh = false;
     mMouseOverChip = -1;
     SetDirty(false);
   }
 
 private:
-  IRECT RowsArea() const { return mRECT.GetReducedFromTop(kHeaderHeight + kFilterAreaHeight).GetPadded(-4.0f); }
+  IRECT GridArea() const
+  {
+    return mRECT.GetReducedFromTop(kHeaderHeight + kFilterAreaHeight).GetPadded(-8.0f).GetReducedFromRight(2.0f);
+  }
   IRECT RefreshRect() const { return mRECT.GetFromTop(kHeaderHeight).GetFromRight(30.0f).GetCentredInside(18.0f); }
-  float MaxScroll() const { return std::max(0.0f, (float)mFiltered.size() * kRowHeight - RowsArea().H()); }
+
+  float ContentHeight() const
+  {
+    const int numRows = ((int)mFiltered.size() + kNumCols - 1) / kNumCols;
+    return numRows * (kCardHeight + kCardGap);
+  }
+
+  float MaxScroll() const { return std::max(0.0f, ContentHeight() - GridArea().H()); }
 
   // Pill-shaped category chips, flowing over two rows under the header.
   IRECT ChipRect(int filter) const
@@ -1221,20 +1233,25 @@ private:
     return IRECT();
   }
 
-  IRECT RowRect(int i) const
+  IRECT CardRect(int filteredIdx) const
   {
-    const IRECT rows = RowsArea();
-    const float y = rows.T + i * kRowHeight - mScroll;
-    return IRECT(rows.L, y, rows.R - 5.0f, y + kRowHeight);
+    const IRECT grid = GridArea();
+    const int col = filteredIdx % kNumCols;
+    const int row = filteredIdx / kNumCols;
+    const float w = (grid.W() - kCardGap) / (float)kNumCols;
+    const float x = grid.L + col * (w + kCardGap);
+    const float y = grid.T + row * (kCardHeight + kCardGap) - mScroll;
+    return IRECT(x, y, x + w, y + kCardHeight);
   }
 
-  int RowAt(float x, float y) const
+  int CardAt(float x, float y) const
   {
-    const IRECT rows = RowsArea();
-    if (!rows.Contains(x, y))
+    if (!GridArea().Contains(x, y))
       return -1;
-    const int idx = (int)((y - rows.T + mScroll) / kRowHeight);
-    return (idx >= 0 && idx < (int)mFiltered.size()) ? idx : -1;
+    for (int i = 0; i < (int)mFiltered.size(); i++)
+      if (CardRect(i).Contains(x, y))
+        return i;
+    return -1;
   }
 
   IBitmap* GetImage(const std::string& path)
@@ -1257,51 +1274,112 @@ private:
     return inserted.first->second.GetAPIBitmap() ? &inserted.first->second : nullptr;
   }
 
-  void DrawRow(IGraphics& g, const tonegallery::ToneEntry& entry, const IRECT& row, bool mouseOver)
+  static void TwoLines(const std::string& s, size_t maxChars, std::string& line1, std::string& line2)
   {
-    if (mouseOver)
-      g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.12f), row, 4.0f);
+    if (s.length() <= maxChars)
+    {
+      line1 = s;
+      line2 = "";
+      return;
+    }
+    // Prefer breaking at a space near the limit.
+    size_t breakAt = s.rfind(' ', maxChars);
+    if (breakAt == std::string::npos || breakAt < maxChars / 2)
+      breakAt = maxChars;
+    line1 = s.substr(0, breakAt);
+    line2 = tonegallery::Ellipsize(s.substr(breakAt == maxChars ? breakAt : breakAt + 1), maxChars);
+  }
 
-    // Thumbnail
-    const IRECT thumb = row.GetFromLeft(kRowHeight).GetCentredInside(26.0f);
+  void DrawCard(IGraphics& g, const tonegallery::ToneEntry& entry, const IRECT& card, bool mouseOver, const IRECT& grid)
+  {
+    const IColor gearColor = tonegallery::GearTypeColor(entry.gearType);
+
+    g.FillRoundRect(IColor(255, 32, 33, 41), card, 8.0f);
+
+    // Photo (cover-cropped into the top of the card)
+    const IRECT photo = card.GetFromTop(kPhotoHeight).GetPadded(-1.5f);
     IBitmap* pBitmap = GetImage(entry.imagePath);
     if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0)
     {
       const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
-      IRECT fit = thumb;
-      if (bmpAspect > 1.0f)
-        fit = thumb.GetMidVPadded(0.5f * thumb.W() / bmpAspect);
+      const float areaAspect = photo.W() / photo.H();
+      IRECT cover = photo;
+      if (bmpAspect > areaAspect)
+        cover = photo.GetMidHPadded(0.5f * photo.H() * bmpAspect); // wider: overflow left/right
       else
-        fit = thumb.GetMidHPadded(0.5f * thumb.H() * bmpAspect);
-      g.DrawFittedBitmap(*pBitmap, fit);
+        cover = photo.GetMidVPadded(0.5f * photo.W() / bmpAspect); // taller: overflow top/bottom
+      g.PathClipRegion(photo.Intersect(grid));
+      g.DrawFittedBitmap(*pBitmap, cover);
+      g.PathClipRegion(grid);
     }
     else
     {
-      const IColor c = tonegallery::GearTypeColor(entry.gearType);
-      g.FillRoundRect(c.WithOpacity(0.2f), thumb, 4.0f);
-      const IText initialText(12.0f, c, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
-      const char initial[2] = {entry.name.empty() ? '?' : (char)std::toupper((unsigned char)entry.name[0]), 0};
-      g.DrawText(initialText, initial, thumb);
+      g.FillRoundRect(gearColor.WithOpacity(0.15f), photo, 6.0f);
+      const IText initialText(15.0f, gearColor, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      std::string initials;
+      initials += entry.name.empty() ? '?' : (char)std::toupper((unsigned char)entry.name[0]);
+      g.DrawText(initialText, initials.c_str(), photo);
     }
 
-    // Name
-    const IRECT nameArea = row.GetReducedFromLeft(kRowHeight + 4.0f).GetReducedFromRight(14.0f);
-    const IText nameText(12.0f, COLOR_WHITE, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
-    g.DrawText(nameText, tonegallery::Ellipsize(entry.name, 21).c_str(), nameArea);
+    // Name (up to two lines)
+    const IRECT body = card.GetReducedFromTop(kPhotoHeight).GetPadded(-6.0f);
+    const IText nameText(8.5f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Top);
+    std::string n1, n2;
+    TwoLines(entry.name, 18, n1, n2);
+    g.DrawText(nameText, n1.c_str(), body.GetFromTop(10.0f));
+    if (!n2.empty())
+      g.DrawText(nameText, n2.c_str(), body.GetReducedFromTop(10.0f).GetFromTop(10.0f));
 
-    // Gear-type dot
-    const IRECT dot = row.GetFromRight(14.0f).GetCentredInside(6.0f);
-    g.FillEllipse(tonegallery::GearTypeColor(entry.gearType), dot);
+    // Description (up to two lines)
+    const IText descText(7.5f, IColor(255, 120, 123, 132), "Inter-Regular", EAlign::Near, EVAlign::Top);
+    std::string d1, d2;
+    TwoLines(entry.description, 21, d1, d2);
+    const IRECT descArea = body.GetReducedFromTop(21.0f);
+    g.DrawText(descText, d1.c_str(), descArea.GetFromTop(9.0f));
+    if (!d2.empty())
+      g.DrawText(descText, d2.c_str(), descArea.GetReducedFromTop(9.0f).GetFromTop(9.0f));
+
+    // Gear chip + first tag
+    const IRECT tagRow = body.GetFromBottom(11.0f);
+    const char* gearLabel = tonegallery::GearTypeChipLabel(entry.gearType);
+    const float gearW = 10.0f + 4.6f * (float)strlen(gearLabel);
+    const IRECT gearChip = tagRow.GetFromLeft(gearW);
+    g.FillRoundRect(gearColor, gearChip, 4.0f);
+    const IText gearText(6.5f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    g.DrawText(gearText, gearLabel, gearChip);
+    if (!entry.tags.empty())
+    {
+      const std::string tag = tonegallery::Ellipsize(entry.tags.front(), 12);
+      const float tagW = 10.0f + 4.2f * (float)tag.length();
+      IRECT tagChip = tagRow.GetReducedFromLeft(gearW + 4.0f).GetFromLeft(tagW);
+      if (tagChip.R <= card.R - 4.0f)
+      {
+        g.FillRoundRect(IColor(18, 255, 255, 255), tagChip, 4.0f);
+        const IText tagText(6.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Center, EVAlign::Middle);
+        g.DrawText(tagText, tag.c_str(), tagChip);
+      }
+    }
+
+    // Border / hover glow
+    if (mouseOver)
+    {
+      g.DrawRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.25f), card.GetPadded(1.0f), 9.0f, nullptr, 3.0f);
+      g.DrawRoundRect(PluginColors::NAM_THEMECOLOR, card, 8.0f, nullptr, 1.2f);
+    }
+    else
+    {
+      g.DrawRoundRect(IColor(18, 255, 255, 255), card, 8.0f);
+    }
   }
 
   std::vector<tonegallery::ToneEntry> mEntries;
   std::vector<int> mFiltered;
   int mFilter = tonegallery::kFilterAll;
   float mScroll = 0.0f;
-  int mMouseOverRow = -1;
+  int mMouseOverCard = -1;
   bool mMouseOverRefresh = false;
   int mMouseOverChip = -1;
-  int mMenuRowIdx = -1;
+  int mMenuEntryIdx = -1;
   IPopupMenu mMenu;
   std::map<std::string, IBitmap> mImageCache;
   IFileDialogCompletionHandlerFunc mLoadModelFunc;
@@ -1390,11 +1468,11 @@ public:
   void OnAttached() override
   {
     const float pad = 20.0f;
-    const IVStyle titleStyle = DEFAULT_STYLE.WithValueText(IText(30, COLOR_WHITE, "Michroma-Regular"))
-                                 .WithDrawFrame(false)
-                                 .WithShadowOffset(2.f);
+    const IVStyle titleStyle =
+      DEFAULT_STYLE.WithValueText(IText(30, COLOR_WHITE, "Inter-Bold")).WithDrawFrame(false).WithShadowOffset(2.f);
 
-    AddNamedChildControl(new IBitmapControl(GetRECT(), mBitmap), mControlNames.bitmap)->SetIgnoreMouse(true);
+    AddNamedChildControl(new IPanelControl(GetRECT(), IColor(255, 14, 14, 17)), mControlNames.bitmap)
+      ->SetIgnoreMouse(true);
 
     const auto titleArea = GetRECT().GetPadded(-(pad + 10.0f)).GetFromTop(50.0f);
     AddNamedChildControl(new IVLabelControl(titleArea, "TONE GALLERY", titleStyle), mControlNames.title);
@@ -1415,7 +1493,7 @@ public:
 
     // Open-library-folder button (bottom-left corner)
     const auto folderButtonArea = GetRECT().GetPadded(-pad).GetFromBLHC(120.0f, 20.0f);
-    const IText linkText(13.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    const IText linkText(13.0f, PluginColors::HELP_TEXT, "Inter-Regular", EAlign::Near, EVAlign::Middle);
     auto openFolderAction = [](IControl* pCaller) {
       const std::string root = tonegallery::PathToUTF8(tonegallery::GetToneLibraryRoot());
       if (!root.empty())
