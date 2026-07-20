@@ -14,6 +14,8 @@
 #include "IPlug_include_in_plug_hdr.h"
 #include "ISender.h"
 
+#include <array>
+
 const int kNumPresets = 1;
 // The plugin is mono inside
 constexpr size_t kNumChannelsInternal = 1;
@@ -216,6 +218,47 @@ public:
   // reopened.
   bool mToneRackMode = false;
 
+  // --- Tone Gallery fork: signal chain -------------------------------------
+  // The plugin can run a chain of up to 4 tone units in series:
+  //   unit 1 = the plugin's regular model + IR (mModel / mIR)
+  //   units 2..4 = the extra ChainSlots below, each model -> IR -> level,
+  //                processed right after unit 1's IR, before the DC blocker.
+  // Each unit has a bypass and an output level. All of it is serialized with
+  // the project (see the ###NAMChainV1### block in Serialization).
+  static constexpr int kNumChainSlots = 3; // extra units beyond the main one
+
+  struct ChainSlot
+  {
+    // Live DSP (audio thread only, swapped in via _ApplyDSPStaging)
+    std::unique_ptr<ResamplingNAM> model;
+    std::unique_ptr<dsp::ImpulseResponse> ir;
+    // Staged DSP (created on the UI thread, picked up by the audio thread)
+    std::unique_ptr<ResamplingNAM> stagedModel;
+    std::unique_ptr<dsp::ImpulseResponse> stagedIR;
+    // Safe-removal flags
+    std::atomic<bool> removeModel{false};
+    std::atomic<bool> removeIR{false};
+    // What's loaded (UI thread)
+    WDL_String modelPath;
+    WDL_String irPath;
+    WDL_String tonePath; // tone-library folder, for the UI's photo/name
+    // Unit controls (written by UI, read by audio thread)
+    std::atomic<bool> enabled{true};
+    std::atomic<double> levelDB{0.0};
+  };
+
+  std::array<ChainSlot, kNumChainSlots> mChainSlots;
+  // Unit-1 (main model) chain controls
+  std::atomic<bool> mChainMainEnabled{true};
+  std::atomic<double> mChainMainLevelDB{0.0};
+  // Whether the stacked chain view is showing (persists across editor reopen)
+  bool mToneChainMode = false;
+
+  // Load a tone into an extra chain slot (0..kNumChainSlots-1). Empty paths
+  // clear that part of the slot. Called from the UI thread.
+  void SetChainTone(int slot, const char* modelPath, const char* irPath, const char* tonePath);
+  void ClearChainSlot(int slot) { SetChainTone(slot, "", "", ""); }
+
 private:
   // Allocates mInputPointers and mOutputPointers
   void _AllocateIOPointers(const size_t nChans);
@@ -260,6 +303,13 @@ private:
   void _SetInputGain();
   void _SetOutputGain();
   void _ApplySlimParamToLoadedNAMs();
+
+  // Stage a model/IR into an extra chain slot (UI thread). Used by
+  // SetChainTone and by unserialization.
+  void _StageChainModel(int slot, const char* modelPath);
+  void _StageChainIR(int slot, const char* irPath);
+  // Read the ###NAMChainV1### block appended to the state chunk (if present).
+  int _UnserializeChain(const iplug::IByteChunk& chunk, int startPos);
 
   // See: Unserialization.cpp
   void _UnserializeApplyConfig(nlohmann::json& config);
@@ -317,6 +367,11 @@ private:
   // Post-IR filters
   recursive_linear_filter::HighPass mHighPass;
   // recursive_linear_filter::LowPass mLowPass;
+
+  // Scratch buffers for the extra chain units (mono; sized lazily in
+  // ProcessBlock the first time a slot with a model runs).
+  std::array<std::vector<iplug::sample>, kNumChainSlots> mChainArrays;
+  std::array<iplug::sample*, kNumChainSlots> mChainScratchPointers{};
 
   // Path to model's config.json or model.nam
   WDL_String mNAMPath;
