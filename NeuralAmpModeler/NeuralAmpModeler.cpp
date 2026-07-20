@@ -203,8 +203,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto settingsButtonArea = CornerButtonArea(mainB);
     // Wide titlebar buttons -- defined up here so the plugin title can be
     // centered in the space BETWEEN them (no overlap at any accent/name).
-    const IRECT chainButtonArea(settingsButtonArea.L - 178.0f, settingsButtonArea.MH() - 13.0f,
-                                settingsButtonArea.L - 66.0f, settingsButtonArea.MH() + 13.0f);
+    const IRECT chainButtonArea(settingsButtonArea.L - 200.0f, settingsButtonArea.MH() - 13.0f,
+                                settingsButtonArea.L - 92.0f, settingsButtonArea.MH() + 13.0f);
     const IRECT t3kButtonArea = mainArea.GetFromTLHC(130.0f, 50.0f).GetCentredInside(118.0f, 38.0f);
 
     // Model loader button
@@ -346,6 +346,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // SIGNAL CHAIN button (which doubles as BACK TO RACK while editing).
     pGraphics->AttachControl(new NAMAccentPickerControl(settingsButtonArea.GetTranslated(-28.0f, 0.0f)));
     pGraphics->AttachControl(new NAMRackButtonControl(settingsButtonArea.GetTranslated(-56.0f, 0.0f)));
+    pGraphics->AttachControl(new NAMZoomButtonControl(settingsButtonArea.GetTranslated(-84.0f, 0.0f)));
     pGraphics->AttachControl(new NAMChainButtonControl(chainButtonArea));
 
     // Settings/help/about box
@@ -430,6 +431,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     else
     {
       pGraphics->Resize(PLUG_WIDTH, PLUG_HEIGHT, pGraphics->GetDrawScale());
+    }
+
+    // Restore the saved UI scale (this is how the standalone app gets big
+    // enough to fill the screen; also applies inside a DAW).
+    {
+      const double savedScale = tonegallery::LoadSavedUIScale();
+      if (std::abs((double)pGraphics->GetDrawScale() - savedScale) > 0.01)
+        pGraphics->Resize(pGraphics->Width(), pGraphics->Height(), (float)savedScale);
     }
 
     // Restore the "now playing" display (sidebar glow, favorites, detail
