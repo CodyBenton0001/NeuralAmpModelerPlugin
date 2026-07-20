@@ -79,6 +79,9 @@ enum EMsgTags
   kMsgTagLoadFailed,
   kMsgTagLoadedModel,
   kMsgTagLoadedIR,
+  // Tone Gallery fork: tell a file browser to show its empty/default state
+  // (used when the browsers switch to showing a chain unit with no file).
+  kMsgTagClearedDisplay,
   kNumMsgTags
 };
 
@@ -329,6 +332,9 @@ private:
   void _StageChainIR(int slot, const char* irPath);
   // Set a knob param's value, update the on-screen knob, and apply it.
   void _SetKnobParamAndNotify(int paramIdx, double value);
+  // Point the model/IR file browsers at whatever the current edit target is
+  // (a chain slot's files while editing, the main tone's otherwise).
+  void _UpdateBrowsersForEditSlot();
   // Read the ###NAMChainV1### block appended to the state chunk (if present).
   int _UnserializeChain(const iplug::IByteChunk& chunk, int startPos);
 
