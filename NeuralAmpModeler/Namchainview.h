@@ -127,9 +127,8 @@ public:
     PLUG()->BeginChainKnobEdit(unit); // also points the main knobs at the unit
     PLUG()->mToneChainMode = false;
     Hide(true);
-    if (IControl* pBanner = GetUI()->GetControlWithTag(kCtrlTagChainBanner))
-      pBanner->Hide(false);
     GetUI()->Resize(PLUG_WIDTH, PLUG_HEIGHT, GetUI()->GetDrawScale());
+    GetUI()->SetAllControlsDirty(); // the SIGNAL CHAIN button becomes BACK TO RACK
   }
 
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
@@ -582,68 +581,9 @@ private:
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
 };
 
-// The strip shown across the top of the main view while a chain unit's tone
-// is being chosen: "EDITING RACK UNIT n ... DONE". Clicking it (or the DONE
-// side) returns to the stacked chain view.
-class NAMChainEditBannerControl : public IControl
-{
-public:
-  NAMChainEditBannerControl(const IRECT& bounds)
-  : IControl(bounds)
-  {
-    SetTooltip("Done - back to the rack");
-  }
-
-  void Draw(IGraphics& g) override
-  {
-    const IColor accent = namtheme::Accent();
-    const int unit = PLUG()->mChainEditSlot;
-    if (unit < 0)
-      return;
-
-    // Bar
-    g.FillRect(accent.WithOpacity(mMouseIsOver ? 0.32f : 0.22f), mRECT);
-    g.FillRect(accent, mRECT.GetFromBottom(2.0f));
-
-    // Pulsing-ish label
-    const IText labelText(10.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Middle);
-    char label[96];
-    if (unit == 0)
-      snprintf(label, sizeof(label), "EDITING RACK UNIT 1 - tones + knobs now target this unit");
-    else
-      snprintf(label, sizeof(label), "EDITING RACK UNIT %d - tones + knobs now target this unit", unit + 1);
-    g.DrawText(labelText, label, mRECT.GetReducedFromLeft(14.0f));
-
-    // DONE button (right)
-    const IRECT done = mRECT.GetFromRight(130.0f);
-    const IText doneText(10.0f, mMouseIsOver ? COLOR_WHITE : accent, "Inter-Bold", EAlign::Far, EVAlign::Middle);
-    g.DrawText(doneText, "DONE - BACK TO RACK", done.GetReducedFromRight(14.0f));
-  }
-
-  void OnMouseDown(float x, float y, const IMouseMod& mod) override
-  {
-    PLUG()->EndChainKnobEdit(); // hands the knobs back to the main tone
-    PLUG()->mToneChainMode = true;
-    Hide(true);
-    if (IControl* pChain = GetUI()->GetControlWithTag(kCtrlTagChainView))
-      pChain->Hide(false);
-    GetUI()->Resize(PLUG_WIDTH, (int)kChainViewHeight, GetUI()->GetDrawScale());
-  }
-
-  void OnMouseOver(float x, float y, const IMouseMod& mod) override
-  {
-    IControl::OnMouseOver(x, y, mod);
-    SetDirty(false);
-  }
-
-  void OnMouseOut() override
-  {
-    IControl::OnMouseOut();
-    SetDirty(false);
-  }
-};
-
-// Titlebar button that switches into the stacked chain view.
+// The wide SIGNAL CHAIN button in the titlebar. Normally it opens the
+// stacked chain view; while a rack unit is being edited it turns into an
+// accent-colored BACK TO RACK button (and returns you to the rack).
 class NAMChainButtonControl : public IControl
 {
 public:
@@ -655,14 +595,44 @@ public:
 
   void Draw(IGraphics& g) override
   {
-    if (mMouseIsOver)
-      g.FillRoundRect(PluginColors::MOUSEOVER, mRECT, 4.0f);
-    const IRECT icon = mRECT.GetCentredInside(14.0f, 14.0f);
-    const IColor c = namtheme::TEXT_DIM;
+    const IColor accent = namtheme::Accent();
+    const int editUnit = PLUG()->mChainEditSlot;
+    const bool editing = editUnit >= 0;
+
+    // Button body
+    if (editing)
+    {
+      g.FillRoundRect(mMouseIsOver ? accent : accent.WithOpacity(0.85f), mRECT, mRECT.H() * 0.5f);
+    }
+    else
+    {
+      g.FillRoundRect(IColor(255, 32, 33, 41), mRECT, mRECT.H() * 0.5f);
+      g.DrawRoundRect(mMouseIsOver ? accent : IColor(30, 255, 255, 255), mRECT, mRECT.H() * 0.5f);
+    }
+
+    // Stacked-rack icon on the left
+    const IRECT icon = mRECT.GetFromLeft(30.0f).GetCentredInside(13.0f, 13.0f);
+    const IColor iconColor = editing ? COLOR_BLACK : (mMouseIsOver ? COLOR_WHITE : namtheme::TEXT_DIM);
     for (int i = 0; i < 3; i++)
     {
-      const float y = icon.T + i * 5.0f;
-      g.DrawRoundRect(c, IRECT(icon.L, y, icon.R, y + 3.5f), 1.0f, nullptr, 1.2f);
+      const float yy = icon.T + i * 5.0f;
+      g.DrawRoundRect(iconColor, IRECT(icon.L, yy, icon.R, yy + 3.2f), 1.0f, nullptr, 1.2f);
+    }
+
+    // Label
+    const IRECT textArea = mRECT.GetReducedFromLeft(28.0f).GetReducedFromRight(8.0f);
+    if (editing)
+    {
+      const IText mainText(9.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      char label[32];
+      snprintf(label, sizeof(label), "BACK TO RACK  (%d)", editUnit == 0 ? 1 : editUnit + 1);
+      g.DrawText(mainText, label, textArea);
+    }
+    else
+    {
+      const IText mainText(
+        9.0f, mMouseIsOver ? COLOR_WHITE : namtheme::TEXT_MAIN, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(mainText, "SIGNAL CHAIN", textArea);
     }
   }
 
@@ -675,10 +645,20 @@ public:
       PLUG()->mToneRackMode = false;
       if (IControl* pRack = GetUI()->GetControlWithTag(kCtrlTagRackView))
         pRack->Hide(true);
-      if (IControl* pBanner = GetUI()->GetControlWithTag(kCtrlTagChainBanner))
-        pBanner->Hide(true);
       pChain->Hide(false);
       GetUI()->Resize(PLUG_WIDTH, (int)kChainViewHeight, GetUI()->GetDrawScale());
     }
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    SetDirty(false);
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    SetDirty(false);
   }
 };
