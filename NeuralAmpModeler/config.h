@@ -27,8 +27,11 @@
 #define PLUG_DOES_MPE 0
 #define PLUG_DOES_STATE_CHUNKS 0
 #define PLUG_HAS_UI 1
-#define PLUG_WIDTH 600
-#define PLUG_HEIGHT 400
+// Tone Gallery fork: stock 600x400 main UI + 210px tone sidebar (left)
+// + 56px favorites bar (bottom). Keep these in sync with kSidebarWidth /
+// kFavoritesBarHeight in NAMToneGalleryControl.h.
+#define PLUG_WIDTH 810
+#define PLUG_HEIGHT 456
 #define PLUG_FPS 60
 #define PLUG_SHARED_RESOURCES 0
 #define PLUG_HOST_RESIZE 0
