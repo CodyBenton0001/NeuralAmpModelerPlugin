@@ -253,6 +253,11 @@ public:
   std::atomic<double> mChainMainLevelDB{0.0};
   // Whether the stacked chain view is showing (persists across editor reopen)
   bool mToneChainMode = false;
+  // Which chain unit the full UI is currently choosing a tone for:
+  //   -1 = not editing (loads go to the main model as usual)
+  //    0 = unit 1 (the main model), 1..kNumChainSlots = the extra slots.
+  // While >= 1, the model/IR load handlers route into that chain slot.
+  int mChainEditSlot = -1;
 
   // Load a tone into an extra chain slot (0..kNumChainSlots-1). Empty paths
   // clear that part of the slot. Called from the UI thread.
