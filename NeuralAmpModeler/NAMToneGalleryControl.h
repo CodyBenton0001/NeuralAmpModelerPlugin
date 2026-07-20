@@ -275,22 +275,68 @@ inline IColor AccentColor()
   return MutableAccent();
 }
 
-inline void SetAccentColor(const IColor& c)
+// Read-modify-write a single key in theme.json (so the accent and the UI
+// scale don't clobber each other).
+inline void SaveThemeKey(const char* key, const nlohmann::json& value)
 {
-  MutableAccent() = c;
   try
   {
-    char code[10];
-    snprintf(code, sizeof(code), "#%02X%02X%02X", c.R, c.G, c.B);
     nlohmann::json j;
-    j["accent"] = code;
+    const std::filesystem::path p = GetToneLibraryRoot() / "theme.json";
+    if (std::filesystem::exists(p))
+    {
+      try
+      {
+        std::ifstream f(p);
+        j = nlohmann::json::parse(f, nullptr, true, true);
+      }
+      catch (const std::exception&)
+      {
+        j = nlohmann::json::object();
+      }
+    }
+    j[key] = value;
     std::filesystem::create_directories(GetToneLibraryRoot());
-    std::ofstream f(GetToneLibraryRoot() / "theme.json");
+    std::ofstream f(p);
     f << j.dump(2);
   }
   catch (const std::exception&)
   {
   }
+}
+
+inline void SetAccentColor(const IColor& c)
+{
+  MutableAccent() = c;
+  char code[10];
+  snprintf(code, sizeof(code), "#%02X%02X%02X", c.R, c.G, c.B);
+  SaveThemeKey("accent", std::string(code));
+}
+
+// --- UI scale: lets the window grow to (nearly) full screen, especially in
+// the standalone app. Persisted next to the accent in theme.json.
+inline double LoadSavedUIScale()
+{
+  try
+  {
+    const std::filesystem::path p = GetToneLibraryRoot() / "theme.json";
+    if (std::filesystem::exists(p))
+    {
+      std::ifstream f(p);
+      nlohmann::json j = nlohmann::json::parse(f, nullptr, true, true);
+      if (j.contains("ui_scale") && j["ui_scale"].is_number())
+        return std::min(2.5, std::max(0.75, j["ui_scale"].get<double>()));
+    }
+  }
+  catch (const std::exception&)
+  {
+  }
+  return 1.0;
+}
+
+inline void SaveUIScale(double scale)
+{
+  SaveThemeKey("ui_scale", scale);
 }
 
 inline bool HasExtension(const std::filesystem::path& p, const char* extLower)
