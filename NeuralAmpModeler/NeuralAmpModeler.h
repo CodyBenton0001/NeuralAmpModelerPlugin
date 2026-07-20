@@ -245,6 +245,13 @@ public:
     // Unit controls (written by UI, read by audio thread)
     std::atomic<bool> enabled{true};
     std::atomic<double> levelDB{0.0};
+    // Per-unit knob settings (driven by the main knobs while this unit is
+    // being edited). EQ values of 5/5/5 mean "flat" and skip the tone stack
+    // entirely so untouched units sound exactly as before.
+    std::atomic<double> inputDB{0.0};
+    std::atomic<double> bass{5.0};
+    std::atomic<double> middle{5.0};
+    std::atomic<double> treble{5.0};
   };
 
   std::array<ChainSlot, kNumChainSlots> mChainSlots;
@@ -263,6 +270,13 @@ public:
   // clear that part of the slot. Called from the UI thread.
   void SetChainTone(int slot, const char* modelPath, const char* irPath, const char* tonePath);
   void ClearChainSlot(int slot) { SetChainTone(slot, "", "", ""); }
+
+  // Start/stop editing a rack unit from the full UI. While a unit >= 1 is
+  // being edited, the INPUT/BASS/MIDDLE/TREBLE/OUTPUT knobs drive that chain
+  // slot's own settings (the main tone's knob values are backed up and
+  // restored when editing ends).
+  void BeginChainKnobEdit(int unit);
+  void EndChainKnobEdit();
 
 private:
   // Allocates mInputPointers and mOutputPointers
@@ -313,6 +327,8 @@ private:
   // SetChainTone and by unserialization.
   void _StageChainModel(int slot, const char* modelPath);
   void _StageChainIR(int slot, const char* irPath);
+  // Set a knob param's value, update the on-screen knob, and apply it.
+  void _SetKnobParamAndNotify(int paramIdx, double value);
   // Read the ###NAMChainV1### block appended to the state chunk (if present).
   int _UnserializeChain(const iplug::IByteChunk& chunk, int startPos);
 
@@ -377,6 +393,11 @@ private:
   // ProcessBlock the first time a slot with a model runs).
   std::array<std::vector<iplug::sample>, kNumChainSlots> mChainArrays;
   std::array<iplug::sample*, kNumChainSlots> mChainScratchPointers{};
+  // Per-slot tone stacks (only run when a slot's EQ is moved off flat).
+  std::array<std::unique_ptr<dsp::tone_stack::AbstractToneStack>, kNumChainSlots> mChainToneStacks;
+  // Main-knob backup while a chain slot borrows the knobs.
+  bool mKnobEditActive = false;
+  double mMainKnobBackup[5] = {0.0, 5.0, 5.0, 5.0, 0.0};
 
   // Path to model's config.json or model.nam
   WDL_String mNAMPath;
