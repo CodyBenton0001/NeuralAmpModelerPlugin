@@ -435,6 +435,11 @@ public:
           SetBrowserState(NAMBrowserState::Empty);
         }
         break;
+      case kMsgTagClearedDisplay:
+        // Tone Gallery fork: back to the pristine "Select..." state.
+        mFileNameControl->SetLabelAndTooltip(mDefaultLabelStr.Get());
+        SetBrowserState(NAMBrowserState::Empty);
+        break;
       case kMsgTagLoadedModel:
       case kMsgTagLoadedIR:
       {
