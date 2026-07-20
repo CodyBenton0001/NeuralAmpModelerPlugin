@@ -360,6 +360,42 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       pControl->SetMouseOverWhenDisabled(true);
     });
 
+    // Restore rack mode across editor close/reopen (the mode lives on the
+    // plugin instance, which survives; the UI is rebuilt from scratch).
+    if (mToneRackMode)
+    {
+      if (IControl* pRack = pGraphics->GetControlWithTag(kCtrlTagRackView))
+        pRack->Hide(false);
+      pGraphics->Resize(PLUG_WIDTH, (int)kRackViewHeight, pGraphics->GetDrawScale());
+    }
+    else
+    {
+      pGraphics->Resize(PLUG_WIDTH, PLUG_HEIGHT, pGraphics->GetDrawScale());
+    }
+
+    // Restore the "now playing" display (sidebar glow, favorites, detail
+    // panel, rack screen) from the model that's actually loaded in the DSP.
+    if (mNAMPath.GetLength())
+    {
+      try
+      {
+        const auto modelDir = std::filesystem::u8path(mNAMPath.Get()).parent_path();
+        const auto entries = tonegallery::ScanToneLibrary(tonegallery::GetToneLibraryRoot());
+        for (const auto& entry : entries)
+        {
+          if (tonegallery::UTF8ToPath(entry.directory) == modelDir)
+          {
+            tonegallery::NotifyNowPlaying(
+              pGraphics, entry, mNAMPath.Get(), mIRPath.GetLength() ? mIRPath.Get() : std::string());
+            break;
+          }
+        }
+      }
+      catch (const std::exception&)
+      {
+      }
+    }
+
     // Apply a saved custom accent color to all style-based controls.
     {
       const IColor ac = tonegallery::AccentColor();
