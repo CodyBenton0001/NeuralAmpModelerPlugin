@@ -44,12 +44,16 @@ using namespace igraphics;
 const int kCtrlTagToneGallery = 1001;
 const int kCtrlTagToneSidebar = 1002;
 const int kCtrlTagFavoritesBar = 1003;
+const int kCtrlTagToneDetail = 1004;
+const int kCtrlTagRackView = 1005;
 
 // Window layout: the always-visible tone list on the left and the favorites
 // bar under the main UI. The main plugin UI keeps its stock 600x400 size;
 // config.h grows PLUG_WIDTH/PLUG_HEIGHT by these amounts.
 const float kSidebarWidth = 210.0f;
 const float kFavoritesBarHeight = 56.0f;
+const float kDetailPanelWidth = 240.0f;
+const float kRackViewHeight = 140.0f;
 
 namespace tonegallery
 {
@@ -118,9 +122,15 @@ struct ToneEntry
   GearType gearType = GearType::Other;
   std::vector<std::string> tags;
   std::string imagePath; // absolute path, empty if none
-  std::string modelPath; // absolute path of .nam, empty if none
-  std::string irPath; // absolute path of .wav, empty if none
+  std::string modelPath; // default .nam (absolute), empty if none
+  std::string irPath; // default .wav (absolute), empty if none
+  std::vector<std::string> models; // ALL .nam files (absolute, sorted)
+  std::vector<std::string> irs; // ALL .wav files (absolute, sorted)
+  std::string url; // TONE3000 page, if known
 };
+
+// Runtime accent color (defined after GetToneLibraryRoot).
+inline IColor AccentColor();
 
 inline GearType GearTypeFromString(std::string s)
 {
@@ -153,7 +163,7 @@ inline IColor GearTypeColor(GearType t)
   switch (t)
   {
     case GearType::Amp: return IColor(255, 219, 148, 43); // orange
-    case GearType::AmpCab: return PluginColors::NAM_THEMECOLOR;
+    case GearType::AmpCab: return AccentColor();
     case GearType::IR: return IColor(255, 80, 133, 232); // blue
     case GearType::Pedal: return IColor(255, 186, 85, 211); // purple
     default: return IColor(255, 120, 120, 120);
@@ -223,6 +233,61 @@ inline std::filesystem::path GetToneLibraryRoot()
     // fall through to default
   }
   return home / "Documents" / "NAM Tones";
+}
+
+// --- Accent color: runtime-changeable, persisted to theme.json in the
+// library root. The default is the compiled-in theme color.
+inline IColor& MutableAccent()
+{
+  static IColor sAccent = []() {
+    IColor c = PluginColors::NAM_THEMECOLOR;
+    try
+    {
+      const std::filesystem::path p = GetToneLibraryRoot() / "theme.json";
+      if (std::filesystem::exists(p))
+      {
+        std::ifstream f(p);
+        nlohmann::json j = nlohmann::json::parse(f, nullptr, true, true);
+        if (j.contains("accent") && j["accent"].is_string())
+        {
+          const std::string code = j["accent"].get<std::string>();
+          if (code.size() == 7 && code[0] == '#')
+          {
+            const long v = std::strtol(code.c_str() + 1, nullptr, 16);
+            c = IColor(255, (int)((v >> 16) & 0xFF), (int)((v >> 8) & 0xFF), (int)(v & 0xFF));
+          }
+        }
+      }
+    }
+    catch (const std::exception&)
+    {
+    }
+    return c;
+  }();
+  return sAccent;
+}
+
+inline IColor AccentColor()
+{
+  return MutableAccent();
+}
+
+inline void SetAccentColor(const IColor& c)
+{
+  MutableAccent() = c;
+  try
+  {
+    char code[10];
+    snprintf(code, sizeof(code), "#%02X%02X%02X", c.R, c.G, c.B);
+    nlohmann::json j;
+    j["accent"] = code;
+    std::filesystem::create_directories(GetToneLibraryRoot());
+    std::ofstream f(GetToneLibraryRoot() / "theme.json");
+    f << j.dump(2);
+  }
+  catch (const std::exception&)
+  {
+  }
 }
 
 inline bool HasExtension(const std::filesystem::path& p, const char* extLower)
@@ -303,12 +368,19 @@ inline bool ScanToneFolder(const std::filesystem::path& dir, ToneEntry& entry)
       const std::string ir = GetStr("ir");
       if (!ir.empty() && fs::exists(dir / UTF8ToPath(ir)))
         entry.irPath = PathToUTF8(dir / UTF8ToPath(ir));
+      entry.url = GetStr("url");
     }
     catch (const std::exception&)
     {
       // Bad JSON: keep going with inferred values.
     }
   }
+
+  // All variants (models & IRs), sorted.
+  for (const auto& p : namFiles)
+    entry.models.push_back(PathToUTF8(p));
+  for (const auto& p : wavFiles)
+    entry.irs.push_back(PathToUTF8(p));
 
   // Fill in anything the metadata didn't provide.
   if (entry.imagePath.empty() && !imageFiles.empty())
@@ -432,6 +504,53 @@ inline void LoadToneEntryFiles(const ToneEntry& entry, const IFileDialogCompleti
   }
 }
 
+// --- "Now playing" plumbing -----------------------------------------------
+// Controls that show the currently-loaded tone implement this and are poked
+// through their control tags whenever something loads a tone.
+class INowPlayingListener
+{
+public:
+  virtual ~INowPlayingListener() {}
+  virtual void SetNowPlaying(const ToneEntry& entry, const std::string& modelPath, const std::string& irPath) = 0;
+};
+
+inline void NotifyNowPlaying(IGraphics* ui, const ToneEntry& entry, const std::string& modelPath,
+                             const std::string& irPath)
+{
+  if (ui == nullptr)
+    return;
+  const int tags[] = {kCtrlTagToneSidebar, kCtrlTagFavoritesBar, kCtrlTagToneDetail, kCtrlTagRackView};
+  for (int tag : tags)
+  {
+    if (IControl* pControl = ui->GetControlWithTag(tag))
+    {
+      if (auto* pListener = dynamic_cast<INowPlayingListener*>(pControl))
+        pListener->SetNowPlaying(entry, modelPath, irPath);
+    }
+  }
+}
+
+// Greedy word-wrap into at most maxLines lines of ~maxChars characters.
+inline std::vector<std::string> WrapLines(const std::string& s, size_t maxChars, size_t maxLines)
+{
+  std::vector<std::string> lines;
+  std::string remaining = s;
+  while (!remaining.empty() && lines.size() < maxLines)
+  {
+    if (remaining.length() <= maxChars || lines.size() == maxLines - 1)
+    {
+      lines.push_back(lines.size() == maxLines - 1 ? Ellipsize(remaining, maxChars) : remaining);
+      break;
+    }
+    size_t breakAt = remaining.rfind(' ', maxChars);
+    if (breakAt == std::string::npos || breakAt < maxChars / 2)
+      breakAt = maxChars;
+    lines.push_back(remaining.substr(0, breakAt));
+    remaining = remaining.substr(breakAt == maxChars ? breakAt : breakAt + 1);
+  }
+  return lines;
+}
+
 } // namespace tonegallery
 
 // ===========================================================================
@@ -488,8 +607,8 @@ public:
 
   void Draw(IGraphics& g) override
   {
-    const IColor active = PluginColors::NAM_THEMECOLOR;
-    const IColor inactive = PluginColors::NAM_THEMECOLOR.WithOpacity(0.15f);
+    const IColor active = tonegallery::AccentColor();
+    const IColor inactive = tonegallery::AccentColor().WithOpacity(0.15f);
     const IText activeText(11.0f, COLOR_BLACK, "Inter-Regular", EAlign::Center, EVAlign::Middle);
     const IText inactiveText(11.0f, PluginColors::NAM_THEMEFONTCOLOR, "Inter-Regular", EAlign::Center, EVAlign::Middle);
 
@@ -628,7 +747,7 @@ public:
         const float travel = mRECT.H() - barH;
         const float pos = (mScroll / (contentH - mRECT.H())) * travel;
         const IRECT bar(mRECT.R - 4.0f, mRECT.T + pos, mRECT.R - 1.0f, mRECT.T + pos + barH);
-        g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.5f), bar, 1.5f);
+        g.FillRoundRect(tonegallery::AccentColor().WithOpacity(0.5f), bar, 1.5f);
       }
     }
 
@@ -769,9 +888,9 @@ private:
     }
     else
     {
-      g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.08f), imageArea, 4.0f);
+      g.FillRoundRect(tonegallery::AccentColor().WithOpacity(0.08f), imageArea, 4.0f);
       const IText placeholderText(
-        24.0f, PluginColors::NAM_THEMECOLOR.WithOpacity(0.6f), "Inter-Bold", EAlign::Center, EVAlign::Middle);
+        24.0f, tonegallery::AccentColor().WithOpacity(0.6f), "Inter-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(placeholderText, "NAM", imageArea);
     }
 
@@ -796,7 +915,7 @@ private:
 
     // Hover outline
     if (mouseOver)
-      g.DrawRoundRect(PluginColors::NAM_THEMECOLOR, tile, 6.0f, nullptr, 2.0f);
+      g.DrawRoundRect(tonegallery::AccentColor(), tile, 6.0f, nullptr, 2.0f);
   }
 
   std::vector<tonegallery::ToneEntry> mEntries;
@@ -816,7 +935,7 @@ private:
 // Three quick-access favorite slots under the main UI. Left-click loads the
 // tone; right-click clears the slot. Slots are assigned by right-clicking a
 // tone in the sidebar. Stored in favorites.json in the library root.
-class NAMFavoritesBarControl : public IControl
+class NAMFavoritesBarControl : public IControl, public tonegallery::INowPlayingListener
 {
 public:
   static constexpr int kNumSlots = 3;
@@ -854,6 +973,13 @@ public:
     SetDirty(false);
   }
 
+  void SetNowPlaying(const tonegallery::ToneEntry& entry, const std::string& modelPath,
+                     const std::string& irPath) override
+  {
+    mNowPlayingDir = entry.directory;
+    SetDirty(false);
+  }
+
   void AssignSlot(int slotIdx, const std::string& folderName)
   {
     if (slotIdx < 0 || slotIdx >= kNumSlots)
@@ -871,12 +997,15 @@ public:
       const IRECT slot = SlotRect(i);
       const bool valid = mSlotValid[i];
       const bool over = (i == mMouseOverSlot);
-      const IColor accent = valid ? tonegallery::GearTypeColor(mSlotEntries[i].gearType) : PluginColors::NAM_THEMECOLOR;
+      const bool active = valid && !mNowPlayingDir.empty() && mSlotEntries[i].directory == mNowPlayingDir;
+      const IColor accent = valid ? tonegallery::GearTypeColor(mSlotEntries[i].gearType) : tonegallery::AccentColor();
 
-      g.FillRoundRect(IColor(255, 30, 30, 34), slot, 8.0f);
+      g.FillRoundRect(active ? accent.WithOpacity(0.15f) : IColor(255, 30, 30, 34), slot, 8.0f);
       if (over)
         g.FillRoundRect(PluginColors::MOUSEOVER, slot, 8.0f);
-      g.DrawRoundRect(valid ? accent.WithOpacity(0.7f) : accent.WithOpacity(0.15f), slot, 8.0f);
+      if (active)
+        g.DrawRoundRect(accent.WithOpacity(0.3f), slot.GetPadded(1.5f), 9.0f, nullptr, 3.0f);
+      g.DrawRoundRect(valid ? accent.WithOpacity(active ? 1.0f : 0.7f) : accent.WithOpacity(0.15f), slot, 8.0f);
 
       // Numbered badge
       const IRECT badge = slot.GetFromLeft(slot.H()).GetCentredInside(18.0f);
@@ -917,7 +1046,10 @@ public:
       return;
     }
     if (mSlotValid[idx])
+    {
       tonegallery::LoadToneEntryFiles(mSlotEntries[idx], mLoadModelFunc, mLoadIRFunc);
+      tonegallery::NotifyNowPlaying(GetUI(), mSlotEntries[idx], mSlotEntries[idx].modelPath, mSlotEntries[idx].irPath);
+    }
   }
 
   void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
@@ -968,11 +1100,336 @@ private:
   }
 
   std::vector<std::string> mSlotNames = std::vector<std::string>(kNumSlots, "");
+  std::string mNowPlayingDir;
   tonegallery::ToneEntry mSlotEntries[kNumSlots];
   bool mSlotValid[kNumSlots] = {false, false, false};
   int mMouseOverSlot = -1;
   int mMenuSlotIdx = -1;
   IPopupMenu mMenu;
+  IFileDialogCompletionHandlerFunc mLoadModelFunc;
+  IFileDialogCompletionHandlerFunc mLoadIRFunc;
+};
+
+// Slide-in tone detail panel: opens to the right of the sidebar when a tone
+// card is clicked. Shows the full photo, name, author, description, tags and
+// every model/IR variant in the tone folder. Clicking a variant loads it.
+class NAMToneDetailControl : public IControl, public tonegallery::INowPlayingListener
+{
+public:
+  static constexpr float kPhotoHeight = 130.0f;
+  static constexpr float kRowHeight = 24.0f;
+
+  NAMToneDetailControl(const IRECT& bounds, IFileDialogCompletionHandlerFunc loadModelFunc,
+                       IFileDialogCompletionHandlerFunc loadIRFunc)
+  : IControl(bounds)
+  , mLoadModelFunc(loadModelFunc)
+  , mLoadIRFunc(loadIRFunc)
+  {
+  }
+
+  void ShowTone(const tonegallery::ToneEntry& entry)
+  {
+    mEntry = entry;
+    mHasEntry = true;
+    mScroll = 0.0f;
+    Hide(false);
+    SetDirty(false);
+  }
+
+  void SetNowPlaying(const tonegallery::ToneEntry& entry, const std::string& modelPath,
+                     const std::string& irPath) override
+  {
+    if (!modelPath.empty())
+      mNowPlayingModel = modelPath;
+    if (!irPath.empty())
+      mNowPlayingIR = irPath;
+    SetDirty(false);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const IColor accent = tonegallery::AccentColor();
+    g.FillRect(IColor(255, 20, 21, 25), mRECT);
+    g.FillRect(accent.WithOpacity(0.3f), mRECT.GetFromRight(1.0f));
+    if (!mHasEntry)
+      return;
+
+    // Photo (cover crop)
+    const IRECT photo = mRECT.GetFromTop(kPhotoHeight);
+    IBitmap* pBitmap = GetImage(mEntry.imagePath);
+    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0)
+    {
+      const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
+      const float areaAspect = photo.W() / photo.H();
+      IRECT cover = photo;
+      if (bmpAspect > areaAspect)
+        cover = photo.GetMidHPadded(0.5f * photo.H() * bmpAspect);
+      else
+        cover = photo.GetMidVPadded(0.5f * photo.W() / bmpAspect);
+      g.PathClipRegion(photo);
+      g.DrawFittedBitmap(*pBitmap, cover);
+      g.PathClipRegion();
+      // Fade the bottom of the photo into the panel
+      g.PathRect(photo.GetFromBottom(40.0f));
+      g.PathFill(IPattern::CreateLinearGradient(
+        photo.L, photo.B - 40.0f, photo.L, photo.B, {{IColor(0, 20, 21, 25), 0.0f}, {IColor(255, 20, 21, 25), 1.0f}}));
+    }
+    else
+    {
+      const IColor gearColor = tonegallery::GearTypeColor(mEntry.gearType);
+      g.FillRect(gearColor.WithOpacity(0.12f), photo);
+      const IText bigText(28.0f, gearColor, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      std::string initials;
+      initials += mEntry.name.empty() ? '?' : (char)std::toupper((unsigned char)mEntry.name[0]);
+      g.DrawText(bigText, initials.c_str(), photo);
+    }
+
+    // Close button
+    const IRECT close = CloseRect();
+    g.FillEllipse(IColor(180, 20, 21, 25), close);
+    const IColor xColor = mMouseOverClose ? COLOR_WHITE : IColor(255, 170, 173, 182);
+    const IRECT xr = close.GetCentredInside(8.0f);
+    g.DrawLine(xColor, xr.L, xr.T, xr.R, xr.B, nullptr, 1.6f);
+    g.DrawLine(xColor, xr.L, xr.B, xr.R, xr.T, nullptr, 1.6f);
+
+    // Name / author / chips
+    const IRECT body = mRECT.GetReducedFromTop(kPhotoHeight - 14.0f).GetHPadded(-10.0f);
+    float y = body.T;
+    const IText nameText(13.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Top);
+    for (const auto& line : tonegallery::WrapLines(mEntry.name, 26, 2))
+    {
+      g.DrawText(nameText, line.c_str(), IRECT(body.L, y, body.R, y + 15.0f));
+      y += 15.0f;
+    }
+    if (!mEntry.author.empty())
+    {
+      const IText authorText(9.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Top);
+      g.DrawText(authorText, ("by " + mEntry.author).c_str(), IRECT(body.L, y + 1.0f, body.R, y + 12.0f));
+      y += 14.0f;
+    }
+    // Gear chip + tags
+    {
+      float x = body.L;
+      const IColor gearColor = tonegallery::GearTypeColor(mEntry.gearType);
+      const char* gearLabel = tonegallery::GearTypeChipLabel(mEntry.gearType);
+      const float gw = 12.0f + 5.0f * (float)strlen(gearLabel);
+      const IRECT gearChip(x, y + 2.0f, x + gw, y + 15.0f);
+      g.FillRoundRect(gearColor, gearChip, 4.0f);
+      const IText gearText(7.5f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(gearText, gearLabel, gearChip);
+      x += gw + 4.0f;
+      const IText tagText(7.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Center, EVAlign::Middle);
+      for (const auto& tag : mEntry.tags)
+      {
+        const std::string t = tonegallery::Ellipsize(tag, 14);
+        const float tw = 12.0f + 4.6f * (float)t.length();
+        if (x + tw > body.R)
+          break;
+        const IRECT chip(x, y + 2.0f, x + tw, y + 15.0f);
+        g.FillRoundRect(IColor(18, 255, 255, 255), chip, 4.0f);
+        g.DrawText(tagText, t.c_str(), chip);
+        x += tw + 4.0f;
+      }
+      y += 21.0f;
+    }
+
+    // LOAD button
+    mLoadButtonRect = IRECT(body.L, y, body.R, y + 24.0f);
+    const bool overLoad = mMouseOverLoad;
+    g.FillRoundRect(overLoad ? accent : accent.WithOpacity(0.85f), mLoadButtonRect, 12.0f);
+    const IText loadText(11.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    g.DrawText(loadText, "LOAD TONE", mLoadButtonRect);
+    y += 32.0f;
+
+    // Description
+    if (!mEntry.description.empty())
+    {
+      const IText descText(9.0f, IColor(255, 150, 153, 162), "Inter-Regular", EAlign::Near, EVAlign::Top);
+      for (const auto& line : tonegallery::WrapLines(mEntry.description, 40, 6))
+      {
+        g.DrawText(descText, line.c_str(), IRECT(body.L, y, body.R, y + 11.0f));
+        y += 11.5f;
+      }
+      y += 6.0f;
+    }
+
+    // Variants
+    const int numVariants = (int)(mEntry.models.size() + mEntry.irs.size());
+    std::stringstream header;
+    header << "VARIANTS (" << numVariants << ")";
+    const IText headerText(9.0f, IColor(255, 139, 142, 152), "Inter-Bold", EAlign::Near, EVAlign::Top);
+    g.DrawText(headerText, header.str().c_str(), IRECT(body.L, y, body.R, y + 12.0f));
+    y += 15.0f;
+
+    mListTop = y;
+    const IRECT list(body.L, y, body.R, mRECT.B - 8.0f);
+    g.PathClipRegion(list);
+    for (int i = 0; i < numVariants; i++)
+    {
+      const IRECT row = RowRect(i);
+      if (row.B < list.T || row.T > list.B)
+        continue;
+      const bool isIR = i >= (int)mEntry.models.size();
+      const std::string& path = isIR ? mEntry.irs[i - mEntry.models.size()] : mEntry.models[i];
+      const bool nowPlaying = (!isIR && path == mNowPlayingModel) || (isIR && path == mNowPlayingIR);
+      if (i == mMouseOverRow)
+        g.FillRoundRect(accent.WithOpacity(0.12f), row, 5.0f);
+      // Type chip
+      const IColor typeColor = isIR ? IColor(255, 110, 168, 255) : accent;
+      const IRECT typeChip = row.GetFromLeft(24.0f).GetCentredInside(20.0f, 13.0f);
+      g.FillRoundRect(typeColor.WithOpacity(0.2f), typeChip, 3.0f);
+      const IText typeText(7.0f, typeColor, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(typeText, isIR ? "IR" : "M", typeChip);
+      // Name (filename without extension)
+      const std::string stem = tonegallery::PathToUTF8(tonegallery::UTF8ToPath(path).stem());
+      const IText rowText(
+        9.5f, nowPlaying ? COLOR_WHITE : IColor(255, 190, 193, 202), "Inter-Regular", EAlign::Near, EVAlign::Middle);
+      g.DrawText(
+        rowText, tonegallery::Ellipsize(stem, 30).c_str(), row.GetReducedFromLeft(28.0f).GetReducedFromRight(12.0f));
+      // Now-playing LED
+      if (nowPlaying)
+      {
+        const IRECT led = row.GetFromRight(14.0f).GetCentredInside(6.0f);
+        g.FillEllipse(accent, led);
+      }
+    }
+    // Scrollbar for variants
+    const float contentH = numVariants * kRowHeight;
+    if (contentH > list.H())
+    {
+      const float frac = list.H() / contentH;
+      const float barH = std::max(16.0f, frac * list.H());
+      const float travel = list.H() - barH;
+      const float pos = (mScroll / (contentH - list.H())) * travel;
+      g.FillRoundRect(
+        accent.WithOpacity(0.5f), IRECT(mRECT.R - 4.0f, list.T + pos, mRECT.R - 2.0f, list.T + pos + barH), 1.0f);
+    }
+    g.PathClipRegion();
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (!mHasEntry)
+      return;
+    if (CloseRect().Contains(x, y))
+    {
+      Hide(true);
+      return;
+    }
+    if (mLoadButtonRect.Contains(x, y))
+    {
+      tonegallery::LoadToneEntryFiles(mEntry, mLoadModelFunc, mLoadIRFunc);
+      tonegallery::NotifyNowPlaying(GetUI(), mEntry, mEntry.modelPath, mEntry.irPath);
+      return;
+    }
+    const int idx = RowAt(x, y);
+    if (idx >= 0)
+    {
+      const bool isIR = idx >= (int)mEntry.models.size();
+      const std::string& path = isIR ? mEntry.irs[idx - mEntry.models.size()] : mEntry.models[idx];
+      WDL_String fileName(path.c_str());
+      WDL_String dir(mEntry.directory.c_str());
+      if (isIR)
+      {
+        if (mLoadIRFunc)
+          mLoadIRFunc(fileName, dir);
+        tonegallery::NotifyNowPlaying(GetUI(), mEntry, "", path);
+      }
+      else
+      {
+        if (mLoadModelFunc)
+          mLoadModelFunc(fileName, dir);
+        tonegallery::NotifyNowPlaying(GetUI(), mEntry, path, "");
+      }
+    }
+  }
+
+  void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
+  {
+    const int numVariants = (int)(mEntry.models.size() + mEntry.irs.size());
+    const float listH = mRECT.B - 8.0f - mListTop;
+    const float maxScroll = std::max(0.0f, numVariants * kRowHeight - listH);
+    const float next = std::min(maxScroll, std::max(0.0f, mScroll - d * 30.0f));
+    if (next != mScroll)
+    {
+      mScroll = next;
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    const bool overClose = CloseRect().Contains(x, y);
+    const bool overLoad = mLoadButtonRect.Contains(x, y);
+    const int row = RowAt(x, y);
+    if (overClose != mMouseOverClose || overLoad != mMouseOverLoad || row != mMouseOverRow)
+    {
+      mMouseOverClose = overClose;
+      mMouseOverLoad = overLoad;
+      mMouseOverRow = row;
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    mMouseOverClose = false;
+    mMouseOverLoad = false;
+    mMouseOverRow = -1;
+    SetDirty(false);
+  }
+
+private:
+  IRECT CloseRect() const { return mRECT.GetFromTRHC(30.0f, 30.0f).GetCentredInside(20.0f); }
+
+  IRECT RowRect(int i) const
+  {
+    const float y = mListTop + i * kRowHeight - mScroll;
+    return IRECT(mRECT.L + 10.0f, y, mRECT.R - 10.0f, y + kRowHeight);
+  }
+
+  int RowAt(float x, float y) const
+  {
+    if (y < mListTop || y > mRECT.B - 8.0f)
+      return -1;
+    const int numVariants = (int)(mEntry.models.size() + mEntry.irs.size());
+    const int idx = (int)((y - mListTop + mScroll) / kRowHeight);
+    return (idx >= 0 && idx < numVariants) ? idx : -1;
+  }
+
+  IBitmap* GetImage(const std::string& path)
+  {
+    if (path.empty())
+      return nullptr;
+    auto found = mImageCache.find(path);
+    if (found != mImageCache.end())
+      return found->second.GetAPIBitmap() ? &found->second : nullptr;
+    IBitmap bitmap;
+    try
+    {
+      if (std::filesystem::exists(tonegallery::UTF8ToPath(path)))
+        bitmap = GetUI()->LoadBitmap(path.c_str());
+    }
+    catch (const std::exception&)
+    {
+    }
+    auto inserted = mImageCache.insert({path, bitmap});
+    return inserted.first->second.GetAPIBitmap() ? &inserted.first->second : nullptr;
+  }
+
+  tonegallery::ToneEntry mEntry;
+  bool mHasEntry = false;
+  std::string mNowPlayingModel;
+  std::string mNowPlayingIR;
+  float mScroll = 0.0f;
+  float mListTop = 0.0f;
+  IRECT mLoadButtonRect;
+  bool mMouseOverClose = false;
+  bool mMouseOverLoad = false;
+  int mMouseOverRow = -1;
+  std::map<std::string, IBitmap> mImageCache;
   IFileDialogCompletionHandlerFunc mLoadModelFunc;
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
 };
@@ -983,7 +1440,7 @@ private:
 // The always-visible tone browser on the left: category chips up top, then a
 // two-column grid of tone cards (photo, name, description, tags). Click to
 // load, right-click to assign a favorite slot, mouse wheel to scroll.
-class NAMToneSidebarControl : public IControl
+class NAMToneSidebarControl : public IControl, public tonegallery::INowPlayingListener
 {
 public:
   static constexpr float kHeaderHeight = 46.0f;
@@ -1043,7 +1500,7 @@ public:
     // Refresh icon (circular arrow)
     const IRECT refresh = RefreshRect();
     const IColor iconColor =
-      mMouseOverRefresh ? PluginColors::NAM_THEMECOLOR : PluginColors::NAM_THEMECOLOR.WithOpacity(0.6f);
+      mMouseOverRefresh ? tonegallery::AccentColor() : tonegallery::AccentColor().WithOpacity(0.6f);
     const float cx = refresh.MW(), cy = refresh.MH(), r = 6.0f;
     g.DrawArc(iconColor, cx, cy, r, 30.0f, 330.0f, nullptr, 1.6f);
     g.FillTriangle(iconColor, cx + 1.5f, cy - r - 3.0f, cx + 7.5f, cy - r + 0.5f, cx + 1.5f, cy - r + 4.0f);
@@ -1056,7 +1513,7 @@ public:
       const IRECT chip = ChipRect(i);
       const bool isActive = (i == mFilter);
       const bool isOver = (i == mMouseOverChip);
-      g.FillRoundRect(isActive ? PluginColors::NAM_THEMECOLOR : IColor(13, 255, 255, 255), chip, chip.H() * 0.5f);
+      g.FillRoundRect(isActive ? tonegallery::AccentColor() : IColor(13, 255, 255, 255), chip, chip.H() * 0.5f);
       if (isOver && !isActive)
         g.FillRoundRect(PluginColors::MOUSEOVER, chip, chip.H() * 0.5f);
       g.DrawText(isActive ? chipTextActive : chipTextInactive, tonegallery::FilterLabel(i), chip);
@@ -1096,7 +1553,7 @@ public:
       const float travel = grid.H() - barH;
       const float pos = (mScroll / (contentH - grid.H())) * travel;
       const IRECT bar(mRECT.R - 4.0f, grid.T + pos, mRECT.R - 2.0f, grid.T + pos + barH);
-      g.FillRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.5f), bar, 1.0f);
+      g.FillRoundRect(tonegallery::AccentColor().WithOpacity(0.5f), bar, 1.0f);
     }
     g.PathClipRegion();
   }
@@ -1134,7 +1591,16 @@ public:
       GetUI()->CreatePopupMenu(*this, mMenu, IRECT(x, y, x, y));
       return;
     }
-    tonegallery::LoadToneEntryFiles(mEntries[mFiltered[idx]], mLoadModelFunc, mLoadIRFunc);
+    // Left-click opens the tone detail panel (with the variant list).
+    if (IControl* pDetail = GetUI()->GetControlWithTag(kCtrlTagToneDetail))
+      pDetail->As<NAMToneDetailControl>()->ShowTone(mEntries[mFiltered[idx]]);
+  }
+
+  void SetNowPlaying(const tonegallery::ToneEntry& entry, const std::string& modelPath,
+                     const std::string& irPath) override
+  {
+    mNowPlayingDir = entry.directory;
+    SetDirty(false);
   }
 
   void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
@@ -1360,11 +1826,18 @@ private:
       }
     }
 
-    // Border / hover glow
-    if (mouseOver)
+    // Border / hover glow / now-playing glow
+    const bool nowPlaying = !mNowPlayingDir.empty() && entry.directory == mNowPlayingDir;
+    if (mouseOver || nowPlaying)
     {
-      g.DrawRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.25f), card.GetPadded(1.0f), 9.0f, nullptr, 3.0f);
-      g.DrawRoundRect(PluginColors::NAM_THEMECOLOR, card, 8.0f, nullptr, 1.2f);
+      g.DrawRoundRect(tonegallery::AccentColor().WithOpacity(0.25f), card.GetPadded(1.0f), 9.0f, nullptr, 3.0f);
+      g.DrawRoundRect(tonegallery::AccentColor(), card, 8.0f, nullptr, nowPlaying ? 1.6f : 1.2f);
+      if (nowPlaying)
+      {
+        const IRECT led = card.GetFromTop(kPhotoHeight).GetFromTRHC(16.0f, 16.0f).GetCentredInside(7.0f);
+        g.FillEllipse(tonegallery::AccentColor(), led);
+        g.DrawEllipse(COLOR_BLACK.WithOpacity(0.4f), led);
+      }
     }
     else
     {
@@ -1374,6 +1847,7 @@ private:
 
   std::vector<tonegallery::ToneEntry> mEntries;
   std::vector<int> mFiltered;
+  std::string mNowPlayingDir;
   int mFilter = tonegallery::kFilterAll;
   float mScroll = 0.0f;
   int mMouseOverCard = -1;
@@ -1518,6 +1992,7 @@ private:
   void LoadTone(const tonegallery::ToneEntry& entry)
   {
     tonegallery::LoadToneEntryFiles(entry, mLoadModelFunc, mLoadIRFunc);
+    tonegallery::NotifyNowPlaying(GetUI(), entry, entry.modelPath, entry.irPath);
     HideAnimated(true);
   }
 
