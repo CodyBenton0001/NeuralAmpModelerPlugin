@@ -568,6 +568,9 @@ public:
     if (IControl* pRack = GetUI()->GetControlWithTag(kCtrlTagRackView))
     {
       PLUG()->mToneRackMode = true;
+      PLUG()->mToneChainMode = false;
+      if (IControl* pChain = GetUI()->GetControlWithTag(kCtrlTagChainView))
+        pChain->Hide(true);
       pRack->Hide(false);
       GetUI()->Resize(PLUG_WIDTH, (int)kRackViewHeight, GetUI()->GetDrawScale());
     }
