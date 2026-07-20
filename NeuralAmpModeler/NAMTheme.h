@@ -282,7 +282,7 @@ public:
     // existing highlight-color message.
     char code[10];
     snprintf(code, sizeof(code), "#%02X%02X%02X", c.R, c.G, c.B);
-    GetDelegate()->SendArbitraryMsgFromUI(kMsgTagHighlightColor, (int)strlen(code) + 1, code);
+    GetDelegate()->SendArbitraryMsgFromUI(kMsgTagHighlightColor, kNoTag, (int)strlen(code) + 1, code);
     GetUI()->SetAllControlsDirty();
   }
 
