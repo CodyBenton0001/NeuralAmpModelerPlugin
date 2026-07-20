@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -76,19 +77,37 @@ enum class GearType
   Amp = 0,
   AmpCab,
   IR,
+  Pedal,
   Other,
   NumGearTypes
 };
 
-// What the filter tabs cycle through. kFilterAll shows everything.
+// What the filter chips/tabs cycle through. kFilterAll shows everything.
 enum EGalleryFilter
 {
   kFilterAll = 0,
-  kFilterAmp,
   kFilterAmpCab,
+  kFilterAmp,
   kFilterIR,
+  kFilterPedal,
+  kFilterOther,
   kNumFilters
 };
+
+// Shared labels for the sidebar chips and the gallery tabs.
+inline const char* FilterLabel(int filter)
+{
+  switch (filter)
+  {
+    case kFilterAmpCab: return "AMP+CAB";
+    case kFilterAmp: return "AMPS";
+    case kFilterIR: return "CABS/IR";
+    case kFilterPedal: return "PEDALS";
+    case kFilterOther: return "OTHER";
+    case kFilterAll:
+    default: return "ALL";
+  }
+}
 
 struct ToneEntry
 {
@@ -112,6 +131,8 @@ inline GearType GearTypeFromString(std::string s)
     return GearType::AmpCab;
   if (s == "ir" || s == "cab" || s == "cabinet" || s == "impulse_response")
     return GearType::IR;
+  if (s == "pedal" || s == "stomp" || s == "stompbox" || s == "drive" || s == "fuzz")
+    return GearType::Pedal;
   return GearType::Other;
 }
 
@@ -122,6 +143,7 @@ inline const char* GearTypeChipLabel(GearType t)
     case GearType::Amp: return "AMP";
     case GearType::AmpCab: return "AMP+CAB";
     case GearType::IR: return "IR";
+    case GearType::Pedal: return "PEDAL";
     default: return "TONE";
   }
 }
@@ -133,6 +155,7 @@ inline IColor GearTypeColor(GearType t)
     case GearType::Amp: return IColor(255, 219, 148, 43); // orange
     case GearType::AmpCab: return PluginColors::NAM_THEMECOLOR;
     case GearType::IR: return IColor(255, 80, 133, 232); // blue
+    case GearType::Pedal: return IColor(255, 186, 85, 211); // purple
     default: return IColor(255, 120, 120, 120);
   }
 }
@@ -148,9 +171,11 @@ inline bool MatchesFilter(GearType t, int filter)
 {
   switch (filter)
   {
-    case kFilterAmp: return t == GearType::Amp;
     case kFilterAmpCab: return t == GearType::AmpCab;
+    case kFilterAmp: return t == GearType::Amp;
     case kFilterIR: return t == GearType::IR;
+    case kFilterPedal: return t == GearType::Pedal;
+    case kFilterOther: return t == GearType::Other;
     case kFilterAll:
     default: return true;
   }
@@ -463,12 +488,11 @@ public:
 
   void Draw(IGraphics& g) override
   {
-    static const char* labels[tonegallery::kNumFilters] = {"ALL", "AMPS", "AMP+CAB", "CABS & IRS"};
     const IColor active = PluginColors::NAM_THEMECOLOR;
     const IColor inactive = PluginColors::NAM_THEMECOLOR.WithOpacity(0.15f);
-    const IText activeText(14.0f, COLOR_BLACK, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    const IText activeText(11.0f, COLOR_BLACK, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
     const IText inactiveText(
-      14.0f, PluginColors::NAM_THEMEFONTCOLOR, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      11.0f, PluginColors::NAM_THEMEFONTCOLOR, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
 
     for (int i = 0; i < tonegallery::kNumFilters; i++)
     {
@@ -478,7 +502,7 @@ public:
       g.FillRoundRect(isActive ? active : inactive, seg, 4.0f);
       if (isOver && !isActive)
         g.FillRoundRect(PluginColors::MOUSEOVER, seg, 4.0f);
-      g.DrawText(isActive ? activeText : inactiveText, labels[i], seg);
+      g.DrawText(isActive ? activeText : inactiveText, tonegallery::FilterLabel(i), seg);
     }
   }
 
@@ -765,14 +789,7 @@ private:
 
     // Chip
     const IRECT chipArea = infoArea.GetFromRight(60.0f);
-    IColor chipColor;
-    switch (entry.gearType)
-    {
-      case tonegallery::GearType::Amp: chipColor = IColor(255, 219, 148, 43); break; // orange
-      case tonegallery::GearType::AmpCab: chipColor = PluginColors::NAM_THEMECOLOR; break;
-      case tonegallery::GearType::IR: chipColor = IColor(255, 80, 133, 232); break; // blue
-      default: chipColor = IColor(255, 120, 120, 120); break;
-    }
+    const IColor chipColor = tonegallery::GearTypeColor(entry.gearType);
     g.FillRoundRect(chipColor.WithOpacity(0.25f), chipArea, 6.0f);
     g.DrawRoundRect(chipColor, chipArea, 6.0f);
     const IText chipText(10.0f, chipColor.WithContrast(0.3f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
@@ -968,7 +985,9 @@ class NAMToneSidebarControl : public IControl
 {
 public:
   static constexpr float kHeaderHeight = 46.0f;
+  static constexpr float kFilterAreaHeight = 50.0f;
   static constexpr float kRowHeight = 34.0f;
+  static constexpr float kChipHeight = 18.0f;
 
   NAMToneSidebarControl(const IRECT& bounds, IFileDialogCompletionHandlerFunc loadModelFunc,
                         IFileDialogCompletionHandlerFunc loadIRFunc)
@@ -983,8 +1002,18 @@ public:
   void Refresh()
   {
     mEntries = tonegallery::ScanToneLibrary(tonegallery::GetToneLibraryRoot());
+    ApplyFilter();
+  }
+
+  void ApplyFilter()
+  {
+    mFiltered.clear();
+    for (int i = 0; i < (int)mEntries.size(); i++)
+      if (tonegallery::MatchesFilter(mEntries[i].gearType, mFilter))
+        mFiltered.push_back(i);
     if (mScroll > MaxScroll())
       mScroll = MaxScroll();
+    mMouseOverRow = -1;
     SetDirty(false);
   }
 
@@ -999,10 +1028,12 @@ public:
     const IText titleText(12.0f, COLOR_WHITE, "Michroma-Regular", EAlign::Near, EVAlign::Middle);
     g.DrawText(titleText, "TONE LIBRARY", header.GetReducedFromLeft(12.0f).GetFromTop(28.0f));
     std::stringstream count;
-    count << mEntries.size() << (mEntries.size() == 1 ? " tone" : " tones");
+    if (mFilter == tonegallery::kFilterAll)
+      count << mEntries.size() << (mEntries.size() == 1 ? " tone" : " tones");
+    else
+      count << mFiltered.size() << " of " << mEntries.size() << (mEntries.size() == 1 ? " tone" : " tones");
     const IText countText(10.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Near, EVAlign::Middle);
     g.DrawText(countText, count.str().c_str(), header.GetReducedFromLeft(12.0f).GetFromBottom(16.0f));
-    g.FillRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.2f), header.GetFromBottom(1.0f));
 
     // Refresh icon (circular arrow)
     const IRECT refresh = RefreshRect();
@@ -1012,25 +1043,50 @@ public:
     g.DrawArc(iconColor, cx, cy, r, 30.0f, 330.0f, nullptr, 1.6f);
     g.FillTriangle(iconColor, cx + 1.5f, cy - r - 3.0f, cx + 7.5f, cy - r + 0.5f, cx + 1.5f, cy - r + 4.0f);
 
+    // Category chips
+    const IText chipTextActive(9.5f, COLOR_BLACK, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    const IText chipTextInactive(
+      9.5f, PluginColors::NAM_THEMEFONTCOLOR, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+    {
+      const IRECT chip = ChipRect(i);
+      const bool isActive = (i == mFilter);
+      const bool isOver = (i == mMouseOverChip);
+      g.FillRoundRect(isActive ? PluginColors::NAM_THEMECOLOR : PluginColors::NAM_THEMECOLOR.WithOpacity(0.12f), chip,
+                      chip.H() * 0.5f);
+      if (isOver && !isActive)
+        g.FillRoundRect(PluginColors::MOUSEOVER, chip, chip.H() * 0.5f);
+      g.DrawText(isActive ? chipTextActive : chipTextInactive, tonegallery::FilterLabel(i), chip);
+    }
+    g.FillRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.2f),
+               mRECT.GetFromTop(kHeaderHeight + kFilterAreaHeight).GetFromBottom(1.0f));
+
     // Rows
     const IRECT rows = RowsArea();
     g.PathClipRegion(rows);
-    if (mEntries.empty())
+    if (mFiltered.empty())
     {
       const IText msgText(11.0f, PluginColors::HELP_TEXT, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
-      g.DrawText(msgText, "No tones yet.", rows.GetFromTop(60.0f).GetVShifted(10.0f));
-      g.DrawText(msgText, "Use the Add-Tone helper,", rows.GetFromTop(60.0f).GetVShifted(26.0f));
-      g.DrawText(msgText, "then click the arrow above.", rows.GetFromTop(60.0f).GetVShifted(42.0f));
+      if (mEntries.empty())
+      {
+        g.DrawText(msgText, "No tones yet.", rows.GetFromTop(60.0f).GetVShifted(10.0f));
+        g.DrawText(msgText, "Use the Add-Tone helper,", rows.GetFromTop(60.0f).GetVShifted(26.0f));
+        g.DrawText(msgText, "then click the arrow above.", rows.GetFromTop(60.0f).GetVShifted(42.0f));
+      }
+      else
+      {
+        g.DrawText(msgText, "No tones in this category.", rows.GetFromTop(40.0f).GetVShifted(10.0f));
+      }
     }
-    for (int i = 0; i < (int)mEntries.size(); i++)
+    for (int i = 0; i < (int)mFiltered.size(); i++)
     {
       const IRECT row = RowRect(i);
       if (row.B < rows.T || row.T > rows.B)
         continue;
-      DrawRow(g, mEntries[i], row, i == mMouseOverRow);
+      DrawRow(g, mEntries[mFiltered[i]], row, i == mMouseOverRow);
     }
     // Scrollbar
-    const float contentH = (float)mEntries.size() * kRowHeight;
+    const float contentH = (float)mFiltered.size() * kRowHeight;
     if (contentH > rows.H())
     {
       const float frac = rows.H() / contentH;
@@ -1050,12 +1106,25 @@ public:
       Refresh();
       return;
     }
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+    {
+      if (ChipRect(i).Contains(x, y))
+      {
+        if (mFilter != i)
+        {
+          mFilter = i;
+          mScroll = 0.0f;
+          ApplyFilter();
+        }
+        return;
+      }
+    }
     const int idx = RowAt(x, y);
     if (idx < 0)
       return;
     if (mod.R)
     {
-      mMenuRowIdx = idx;
+      mMenuRowIdx = mFiltered[idx];
       mMenu.Clear();
       mMenu.AddItem("Add to Favorite 1");
       mMenu.AddItem("Add to Favorite 2");
@@ -1063,7 +1132,7 @@ public:
       GetUI()->CreatePopupMenu(*this, mMenu, IRECT(x, y, x, y));
       return;
     }
-    tonegallery::LoadToneEntryFiles(mEntries[idx], mLoadModelFunc, mLoadIRFunc);
+    tonegallery::LoadToneEntryFiles(mEntries[mFiltered[idx]], mLoadModelFunc, mLoadIRFunc);
   }
 
   void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
@@ -1096,16 +1165,21 @@ public:
   {
     IControl::OnMouseOver(x, y, mod);
     const bool overRefresh = RefreshRect().Contains(x, y);
+    int overChip = -1;
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+      if (ChipRect(i).Contains(x, y))
+        overChip = i;
     const int idx = RowAt(x, y);
-    if (idx != mMouseOverRow || overRefresh != mMouseOverRefresh)
+    if (idx != mMouseOverRow || overRefresh != mMouseOverRefresh || overChip != mMouseOverChip)
     {
       mMouseOverRow = idx;
       mMouseOverRefresh = overRefresh;
+      mMouseOverChip = overChip;
       if (overRefresh)
         SetTooltip("Rescan the tone folder");
       else if (idx >= 0)
       {
-        const tonegallery::ToneEntry& e = mEntries[idx];
+        const tonegallery::ToneEntry& e = mEntries[mFiltered[idx]];
         SetTooltip(e.description.empty() ? e.name.c_str() : e.description.c_str());
       }
       SetDirty(false);
@@ -1117,13 +1191,35 @@ public:
     IControl::OnMouseOut();
     mMouseOverRow = -1;
     mMouseOverRefresh = false;
+    mMouseOverChip = -1;
     SetDirty(false);
   }
 
 private:
-  IRECT RowsArea() const { return mRECT.GetReducedFromTop(kHeaderHeight).GetPadded(-4.0f); }
+  IRECT RowsArea() const { return mRECT.GetReducedFromTop(kHeaderHeight + kFilterAreaHeight).GetPadded(-4.0f); }
   IRECT RefreshRect() const { return mRECT.GetFromTop(kHeaderHeight).GetFromRight(30.0f).GetCentredInside(18.0f); }
-  float MaxScroll() const { return std::max(0.0f, (float)mEntries.size() * kRowHeight - RowsArea().H()); }
+  float MaxScroll() const { return std::max(0.0f, (float)mFiltered.size() * kRowHeight - RowsArea().H()); }
+
+  // Pill-shaped category chips, flowing over two rows under the header.
+  IRECT ChipRect(int filter) const
+  {
+    const IRECT area = mRECT.GetReducedFromTop(kHeaderHeight).GetFromTop(kFilterAreaHeight).GetPadded(-6.0f);
+    const float gap = 5.0f;
+    float x = area.L, y = area.T;
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+    {
+      const float w = 14.0f + 5.4f * (float)strlen(tonegallery::FilterLabel(i));
+      if (x + w > area.R)
+      {
+        x = area.L;
+        y += kChipHeight + gap;
+      }
+      if (i == filter)
+        return IRECT(x, y, x + w, y + kChipHeight);
+      x += w + gap;
+    }
+    return IRECT();
+  }
 
   IRECT RowRect(int i) const
   {
@@ -1138,7 +1234,7 @@ private:
     if (!rows.Contains(x, y))
       return -1;
     const int idx = (int)((y - rows.T + mScroll) / kRowHeight);
-    return (idx >= 0 && idx < (int)mEntries.size()) ? idx : -1;
+    return (idx >= 0 && idx < (int)mFiltered.size()) ? idx : -1;
   }
 
   IBitmap* GetImage(const std::string& path)
@@ -1199,9 +1295,12 @@ private:
   }
 
   std::vector<tonegallery::ToneEntry> mEntries;
+  std::vector<int> mFiltered;
+  int mFilter = tonegallery::kFilterAll;
   float mScroll = 0.0f;
   int mMouseOverRow = -1;
   bool mMouseOverRefresh = false;
+  int mMouseOverChip = -1;
   int mMenuRowIdx = -1;
   IPopupMenu mMenu;
   std::map<std::string, IBitmap> mImageCache;
@@ -1302,7 +1401,7 @@ public:
 
     // Filter tabs
     const auto contentArea = GetRECT().GetPadded(-(pad + 10.0f));
-    const auto filterArea = contentArea.GetReducedFromTop(52.0f).GetFromTop(26.0f).GetMidHPadded(190.0f);
+    const auto filterArea = contentArea.GetReducedFromTop(52.0f).GetFromTop(26.0f).GetMidHPadded(250.0f);
     auto onFilterChanged = [&](int filter) {
       if (auto* pGrid = GetGrid())
         pGrid->SetFilter(filter);
