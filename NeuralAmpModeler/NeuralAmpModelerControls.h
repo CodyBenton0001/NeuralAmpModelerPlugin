@@ -151,7 +151,7 @@ public:
     handleBounds = IRECT(handleBounds.L, handleBounds.T, handleBounds.R, handleBounds.T + mBitmap.H());
     IRECT centreBounds = handleBounds.GetPadded(-mStyle.shadowOffset);
     IRECT shadowBounds = handleBounds.GetTranslated(mStyle.shadowOffset, mStyle.shadowOffset);
-    //    const float contrast = mDisabled ? -GRAYED_ALPHA : 0.f;
+    // const float contrast = mDisabled ? -GRAYED_ALPHA : 0.f;
     float cR = 7.f;
     const float tlr = cR;
     const float trr = cR;
@@ -363,7 +363,7 @@ public:
       mFileNameControl->SetLabelAndTooltip(mDefaultLabelStr.Get());
       SetBrowserState(NAMBrowserState::Empty);
       // FIXME disabling output mode...
-      //      pCaller->GetUI()->GetControlWithTag(kCtrlTagOutputMode)->SetDisabled(false);
+      // pCaller->GetUI()->GetControlWithTag(kCtrlTagOutputMode)->SetDisabled(false);
     };
 
     auto chooseFileFunc = [&, loadFileFunc](IControl* pCaller) {
@@ -544,7 +544,7 @@ class IContainerBaseWithNamedChildren : public IContainerBase
 {
 public:
   IContainerBaseWithNamedChildren(const IRECT& bounds)
-  : IContainerBase(bounds) {};
+  : IContainerBase(bounds){};
   ~IContainerBaseWithNamedChildren() = default;
 
 protected:
@@ -562,11 +562,9 @@ protected:
     return GetChild(index);
   };
 
-
 private:
   std::unordered_map<std::string, int> mChildNameIndexMap;
 }; // class IContainerBaseWithNamedChildren
-
 
 struct PossiblyKnownParameter
 {
@@ -586,7 +584,7 @@ class ModelInfoControl : public IContainerBaseWithNamedChildren
 public:
   ModelInfoControl(const IRECT& bounds, const IVStyle& style)
   : IContainerBaseWithNamedChildren(bounds)
-  , mStyle(style) {};
+  , mStyle(style){};
 
   void ClearModelInfo()
   {
@@ -605,9 +603,9 @@ public:
     AddChildControl(new IVLabelControl(GetRECT().SubRectVertical(4, 0), "Model information:", mStyle));
     AddNamedChildControl(new IVLabelControl(GetRECT().SubRectVertical(4, 1), "", mStyle), mControlNames.sampleRate);
     // AddNamedChildControl(
-    //   new IVLabelControl(GetRECT().SubRectVertical(4, 2), "", mStyle), mControlNames.inputCalibrationLevel);
+    // new IVLabelControl(GetRECT().SubRectVertical(4, 2), "", mStyle), mControlNames.inputCalibrationLevel);
     // AddNamedChildControl(
-    //   new IVLabelControl(GetRECT().SubRectVertical(4, 3), "", mStyle), mControlNames.outputCalibrationLevel);
+    // new IVLabelControl(GetRECT().SubRectVertical(4, 3), "", mStyle), mControlNames.outputCalibrationLevel);
   };
 
   void SetModelInfo(const ModelInfo& modelInfo)
@@ -629,9 +627,9 @@ public:
 
     SetControlStr("Sample rate", modelInfo.sampleRate, "Hz", mControlNames.sampleRate);
     // SetControlStr(
-    //   "Input calibration level", modelInfo.inputCalibrationLevel, "dBu", mControlNames.inputCalibrationLevel);
+    // "Input calibration level", modelInfo.inputCalibrationLevel, "dBu", mControlNames.inputCalibrationLevel);
     // SetControlStr(
-    //   "Output calibration level", modelInfo.outputCalibrationLevel, "dBu", mControlNames.outputCalibrationLevel);
+    // "Output calibration level", modelInfo.outputCalibrationLevel, "dBu", mControlNames.outputCalibrationLevel);
 
     mHasInfo = true;
   };
@@ -653,7 +651,7 @@ class OutputModeControl : public IVRadioButtonControl
 public:
   OutputModeControl(const IRECT& bounds, int paramIdx, const IVStyle& style, float buttonSize)
   : IVRadioButtonControl(
-      bounds, paramIdx, {}, "Output Mode", style, EVShape::Ellipse, EDirection::Vertical, buttonSize) {};
+      bounds, paramIdx, {}, "Output Mode", style, EVShape::Ellipse, EDirection::Vertical, buttonSize){};
 
   void SetNormalizedDisable(const bool disable)
   {
@@ -800,7 +798,9 @@ public:
         "are about the same loudness.\nCalibrated=Match the input's digital-analog calibration.");
     }
 
-    const float halfWidth = PLUG_WIDTH / 2.0f - pad;
+    // Tone Gallery fork: was PLUG_WIDTH / 2 - pad, which breaks when the
+    // window is wider than this overlay. Use this control's own width instead.
+    const float halfWidth = GetRECT().W() / 2.0f - pad;
     const auto bottomArea = GetRECT().GetPadded(-pad).GetFromBottom(78.0f);
     const float lineHeight = 15.0f;
     const auto modelInfoArea = bottomArea.GetFromLeft(halfWidth).GetFromTop(4 * lineHeight);
@@ -900,7 +900,7 @@ private:
     AboutControl(const IRECT& bounds, const IVStyle& style, const IText& text)
     : IContainerBase(bounds)
     , mStyle(style)
-    , mText(text) {};
+    , mText(text){};
 
     void OnAttached() override
     {
