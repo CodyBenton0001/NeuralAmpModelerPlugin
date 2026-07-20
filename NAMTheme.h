@@ -1,0 +1,240 @@
+#pragma once
+
+// NAM Tone Gallery fork -- modern dark theme ("Nightfall")
+//
+// Vector-drawn replacements for the stock bitmap-based controls: knobs,
+// switches, meters, file rows, panels and the title. Include from
+// NeuralAmpModeler.cpp after NeuralAmpModelerControls.h.
+//
+// Font IDs used ("Inter-Regular" / "Inter-Bold") are registered in the layout
+// function with a fallback to Roboto if the Inter TTFs aren't bundled.
+
+#include "IControls.h"
+
+using namespace iplug;
+using namespace igraphics;
+
+namespace namtheme
+{
+// Palette (ARGB)
+const IColor BG(255, 14, 14, 17); // window background
+const IColor PANEL(255, 23, 24, 28); // sidebar / favorites strip
+const IColor PANEL2(255, 29, 30, 36); // knob card
+const IColor CARD(255, 32, 33, 41); // tone cards, file rows, meters
+const IColor KNOB_FACE(255, 24, 25, 30);
+const IColor LINE(18, 255, 255, 255); // hairline borders (7% white)
+const IColor TRACK(20, 255, 255, 255); // knob track arc
+const IColor TEXT(255, 236, 238, 242);
+const IColor TEXT_DIM(255, 139, 142, 152);
+const IColor TEXT_FAINT(255, 90, 93, 102);
+
+inline const IColor& Accent()
+{
+  return PluginColors::NAM_THEMECOLOR;
+}
+
+const char* const kFontBody = "Inter-Regular";
+const char* const kFontBold = "Inter-Bold";
+} // namespace namtheme
+
+// A rounded card panel (background layer).
+class ThemedCardControl : public IControl
+{
+public:
+  ThemedCardControl(const IRECT& bounds, const IColor& color, float radius, const IColor& border)
+  : IControl(bounds)
+  , mColor(color)
+  , mRadius(radius)
+  , mBorder(border)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    g.FillRoundRect(mColor, mRECT, mRadius);
+    g.DrawRoundRect(mBorder, mRECT, mRadius);
+  }
+
+private:
+  IColor mColor;
+  float mRadius;
+  IColor mBorder;
+};
+
+// "NEURAL AMP MODELER" with the middle word in the accent color.
+class ThemedTitleControl : public IControl
+{
+public:
+  ThemedTitleControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const float size = 17.0f;
+    IText t(size, namtheme::TEXT, namtheme::kFontBold, EAlign::Near, EVAlign::Middle);
+    const char* seg[3] = {"NEURAL ", "AMP ", "MODELER"};
+    float widths[3];
+    float total = 0.0f;
+    for (int i = 0; i < 3; i++)
+    {
+      IRECT r;
+      g.MeasureText(t, seg[i], r);
+      widths[i] = r.W();
+      total += widths[i];
+    }
+    float x = mRECT.MW() - 0.5f * total;
+    for (int i = 0; i < 3; i++)
+    {
+      t.mFGColor = (i == 1) ? namtheme::Accent() : namtheme::TEXT;
+      g.DrawText(t, seg[i], IRECT(x, mRECT.T, x + widths[i] + 2.0f, mRECT.B));
+      x += widths[i];
+    }
+  }
+};
+
+// Arc knob with glowing indicator dot, in the style of modern soft synths.
+class ThemedKnobControl : public IVKnobControl
+{
+public:
+  ThemedKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style)
+  : IVKnobControl(bounds, paramIdx, label, style, true)
+  {
+    mInnerPointerFrac = 0.62f;
+  }
+
+  void DrawWidget(IGraphics& g) override
+  {
+    const float widgetRadius = GetRadius() * 0.85f;
+    const auto knobRect = mWidgetBounds.GetCentredInside(mWidgetBounds.W(), mWidgetBounds.W());
+    const float cx = knobRect.MW(), cy = knobRect.MH();
+    const float angle = mAngle1 + (static_cast<float>(GetValue()) * (mAngle2 - mAngle1));
+    const IColor accent = GetColor(kX1);
+
+    // Track + value arcs
+    g.DrawArc(namtheme::TRACK, cx, cy, widgetRadius, mAngle1, mAngle2, &mBlend, 3.5f);
+    if (angle > mAngle1 + 0.5f)
+      g.DrawArc(accent, cx, cy, widgetRadius, mAngle1, angle, &mBlend, 3.5f);
+
+    // Face
+    const float capR = widgetRadius - 7.0f;
+    const IRECT capRect(cx - capR, cy - capR, cx + capR, cy + capR);
+    g.FillEllipse(namtheme::KNOB_FACE, capRect, &mBlend);
+    g.DrawEllipse(namtheme::LINE, capRect, &mBlend, 1.0f);
+    if (mMouseIsOver)
+      g.FillEllipse(PluginColors::MOUSEOVER, capRect, &mBlend);
+
+    // Indicator dot with glow
+    float data[2][2];
+    RadialPoints(angle, cx, cy, mInnerPointerFrac * widgetRadius, mInnerPointerFrac * widgetRadius, 2, data);
+    g.PathCircle(data[1][0], data[1][1], 5.5f);
+    g.PathFill(IPattern::CreateRadialGradient(
+                 data[1][0], data[1][1], 7.0f, {{accent.WithOpacity(0.5f), 0.f}, {COLOR_TRANSPARENT, 1.0f}}),
+               {}, &mBlend);
+    g.FillCircle(accent, data[1][0], data[1][1], 2.5f, &mBlend);
+  }
+};
+
+// Pill toggle switch.
+class ThemedSwitchControl : public IVSlideSwitchControl
+{
+public:
+  ThemedSwitchControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style)
+  : IVSlideSwitchControl(
+      bounds, paramIdx, label,
+      style.WithShowValue(false).WithDrawFrame(false).WithDrawShadows(false).WithLabelOrientation(EOrientation::South))
+  {
+  }
+
+  void DrawWidget(IGraphics& g) override
+  {
+    const bool on = GetValue() > 0.5;
+    const IRECT pill = mWidgetBounds.GetCentredInside(34.0f, 17.0f);
+    const IColor accent = GetColor(kX1);
+
+    g.FillRoundRect(on ? accent : IColor(26, 255, 255, 255), pill, pill.H() * 0.5f, &mBlend);
+    if (mMouseIsOver)
+      g.FillRoundRect(PluginColors::MOUSEOVER, pill, pill.H() * 0.5f, &mBlend);
+
+    const float hr = 6.0f;
+    const float hx = on ? pill.R - 2.5f - hr : pill.L + 2.5f + hr;
+    g.FillCircle(on ? COLOR_WHITE : IColor(255, 130, 130, 138), hx, pill.MH(), hr, &mBlend);
+  }
+};
+
+// Slim rounded level meter with a gradient fill.
+class ThemedMeterControl : public IVPeakAvgMeterControl<>
+{
+  static constexpr float KMeterMin = -70.0f;
+  static constexpr float KMeterMax = -0.01f;
+
+public:
+  ThemedMeterControl(const IRECT& bounds, const IVStyle& style)
+  : IVPeakAvgMeterControl<>(bounds, "", style.WithShowValue(false).WithDrawFrame(false).WithWidgetFrac(0.8),
+                            EDirection::Vertical, {}, 0, KMeterMin, KMeterMax, {})
+  {
+    SetPeakSize(1.0f);
+  }
+
+  void OnResize() override
+  {
+    SetTargetRECT(MakeRects(mRECT));
+    mWidgetBounds = mWidgetBounds.GetMidHPadded(5).GetVPadded(10);
+    MakeTrackRects(mWidgetBounds);
+    MakeStepRects(mWidgetBounds, mNSteps);
+    SetDirty(false);
+  }
+
+  void DrawBackground(IGraphics& g, const IRECT& r) override
+  {
+    const IRECT card = r.GetMidHPadded(5.0f);
+    g.FillRoundRect(namtheme::CARD, card, 5.0f);
+    g.DrawRoundRect(namtheme::LINE, card, 5.0f);
+  }
+
+  void DrawTrackHandle(IGraphics& g, const IRECT& r, int chIdx, bool aboveBaseValue) override
+  {
+    if (r.H() > 2)
+    {
+      const IColor accent = GetColor(kX1);
+      g.PathRoundRect(r, 2.0f);
+      g.PathFill(
+        IPattern::CreateLinearGradient(r.L, r.B, r.L, r.T, {{accent, 0.0f}, {accent.WithOpacity(0.35f), 1.0f}}), {},
+        &mBlend);
+    }
+  }
+
+  void DrawPeak(IGraphics& g, const IRECT& r, int chIdx, bool aboveBaseValue) override
+  {
+    g.FillRect(GetColor(kX3), r, &mBlend);
+  }
+};
+
+// The stock file browser with a themed rounded-card look and an accent tint.
+class ThemedFileBrowserControl : public NAMFileBrowserControl
+{
+public:
+  ThemedFileBrowserControl(const IRECT& bounds, int clearMsgTag, const char* labelStr, const char* fileExtension,
+                           IFileDialogCompletionHandlerFunc ch, const IVStyle& style, const ISVG& loadSVG,
+                           const ISVG& clearSVG, const ISVG& leftSVG, const ISVG& rightSVG, const IBitmap& bitmap,
+                           const ISVG& globeSVG, const char* getButtonLabel, const char* getButtonURL,
+                           const IColor& accent)
+  : NAMFileBrowserControl(bounds, clearMsgTag, labelStr, fileExtension, ch, style, loadSVG, clearSVG, leftSVG, rightSVG,
+                          bitmap, globeSVG, getButtonLabel, getButtonURL)
+  , mAccent(accent)
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const IRECT card = mRECT.GetPadded(-1.0f);
+    g.FillRoundRect(namtheme::CARD, card, 9.0f);
+    g.DrawRoundRect(mAccent.WithOpacity(0.4f), card, 9.0f);
+  }
+
+private:
+  IColor mAccent;
+};
