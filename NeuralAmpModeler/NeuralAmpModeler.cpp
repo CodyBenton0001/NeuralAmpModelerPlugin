@@ -18,6 +18,7 @@
 #include "NeuralAmpModelerControls.h"
 #include "NAMToneGalleryControl.h"
 #include "NAMTheme.h"
+#include "NAMTone3000Browser.h"
 
 using namespace iplug;
 using namespace igraphics;
@@ -335,6 +336,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->AttachControl(new NAMToneGalleryPageControl(
                         mainB, backgroundBitmap, crossSVG, style, loadModelCompletionHandler, loadIRCompletionHandler),
                       kCtrlTagToneGallery)
+      ->Hide(true);
+
+    // TONE3000 live search (see NAMTone3000Browser.h): globe button next to
+    // the gallery button opens an in-plugin browser that searches tone3000.com
+    // and downloads tones straight into the local library.
+    pGraphics->AttachControl(new NAMT3KButtonControl(galleryButtonArea.GetTranslated(28.0f, 0.0f)));
+    pGraphics
+      ->AttachControl(new NAMTone3000BrowserControl(mainB, loadModelCompletionHandler, loadIRCompletionHandler),
+                      kCtrlTagTone3000)
       ->Hide(true);
 
     pGraphics
