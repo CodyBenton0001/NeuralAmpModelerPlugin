@@ -446,6 +446,7 @@ public:
   {
     if (ExpandRect().Contains(x, y))
     {
+      PLUG()->mToneRackMode = false;
       Hide(true);
       GetUI()->Resize(PLUG_WIDTH, PLUG_HEIGHT, GetUI()->GetDrawScale());
       return;
@@ -566,6 +567,7 @@ public:
   {
     if (IControl* pRack = GetUI()->GetControlWithTag(kCtrlTagRackView))
     {
+      PLUG()->mToneRackMode = true;
       pRack->Hide(false);
       GetUI()->Resize(PLUG_WIDTH, (int)kRackViewHeight, GetUI()->GetDrawScale());
     }
