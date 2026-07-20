@@ -61,6 +61,10 @@
 
 #define ROBOTO_FN "Roboto-Regular.ttf"
 #define MICHROMA_FN "Michroma-Regular.ttf"
+// Tone Gallery fork: modern UI font (bundled in resources/fonts; the layout
+// code falls back to Roboto if these files are missing).
+#define INTER_FN "Inter-Regular.ttf"
+#define INTER_BOLD_FN "Inter-Bold.ttf"
 
 #define GEAR_FN "Gear.svg"
 #define FILE_FN "File.svg"
