@@ -324,7 +324,12 @@ public:
   void Draw(IGraphics& g) override
   {
     const IColor accent = namtheme::Accent();
-    const IRECT face = mRECT;
+    const IRECT face = FaceRect();
+
+    // If the host refused to shrink the window, blank out everything under
+    // the rack face so the full UI doesn't show through.
+    if (mRECT.H() > kRackViewHeight + 1.0f)
+      g.FillRect(namtheme::BG, mRECT.GetReducedFromTop(kRackViewHeight));
 
     // Faceplate with a subtle vertical sheen
     g.PathRect(face);
@@ -496,13 +501,15 @@ public:
   }
 
 private:
-  IRECT ExpandRect() const { return mRECT.GetFromTRHC(56.0f, 46.0f).GetCentredInside(24.0f); }
+  IRECT FaceRect() const { return mRECT.GetFromTop(kRackViewHeight); }
+  IRECT ExpandRect() const { return FaceRect().GetFromTRHC(56.0f, 46.0f).GetCentredInside(24.0f); }
 
   IRECT FavRect(int i) const
   {
+    const IRECT face = FaceRect();
     const float size = 22.0f;
-    const float x = mRECT.R - 190.0f + i * 28.0f;
-    const float top = mRECT.B - 62.0f;
+    const float x = face.R - 190.0f + i * 28.0f;
+    const float top = face.B - 62.0f;
     return IRECT(x, top, x + size, top + size);
   }
 
