@@ -347,12 +347,15 @@ inline const char* ApiBase()
 }
 
 // gearFilter: "" (all) or one of the API's gear enum values:
-//   "amp-cab", "amp", "pedal", "outboard", "experimental"
-//   (the API also knows "cab"/"ir"/"space" but its NAM search currently
-//   returns nothing for those -- standalone IRs aren't searchable anonymously)
-// orderBy: "" (default) or "trending" / "newest" / "oldest"
-inline bool SearchTones(const std::string& query, const std::string& gearFilter, const std::string& orderBy, int page,
-                        int pageSize, std::vector<SearchResult>& out, long long& total, std::string& err)
+//   "amp-cab", "amp", "pedal", "outboard", "experimental", "cab", "space"
+// orderBy: "" (default) or "trending" / "newest" / "oldest" / "downloads-all-time"
+// platform: "nam" (default) or "ir" (standalone impulse responses)
+// tags: empty (all) or tag names to require
+// NOTE: is_calibrated must be false (not null) or the IR platform returns
+// nothing -- this mirrors exactly what tone3000.com's own search sends.
+inline bool SearchTones(const std::string& query, const std::string& gearFilter, const std::string& orderBy,
+                        const std::string& platform, const std::vector<std::string>& tags, int page, int pageSize,
+                        std::vector<SearchResult>& out, long long& total, std::string& err)
 {
   std::string key = EnsureKey();
   if (key.empty())
@@ -362,12 +365,20 @@ inline bool SearchTones(const std::string& query, const std::string& gearFilter,
   }
   nlohmann::json body = {{"query_term", query},     {"page_number", page},        {"page_size", pageSize},
                          {"order_by", nullptr},     {"tag_names", nullptr},       {"make_names", nullptr},
-                         {"gear_filters", nullptr}, {"is_calibrated", nullptr},   {"size_filters", nullptr},
+                         {"gear_filters", nullptr}, {"is_calibrated", false},     {"size_filters", nullptr},
                          {"usernames", nullptr},    {"platform_filter", nullptr}, {"architecture_filter", nullptr}};
   if (!gearFilter.empty())
     body["gear_filters"] = nlohmann::json::array({gearFilter});
   if (!orderBy.empty())
     body["order_by"] = orderBy;
+  body["platform_filter"] = platform.empty() ? "nam" : platform;
+  if (!tags.empty())
+  {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& t : tags)
+      arr.push_back(t);
+    body["tag_names"] = arr;
+  }
   for (int attempt = 0; attempt < 2; attempt++)
   {
     std::string resp;
@@ -429,6 +440,41 @@ inline bool SearchTones(const std::string& query, const std::string& gearFilter,
     }
   }
   return false;
+}
+
+// TONE3000 curates a ranked list of popular tags (the same ~50 its own
+// website shows in the Tags filter). Anyone can read it anonymously.
+inline bool FetchRankedTags(std::vector<std::string>& out, std::string& err)
+{
+  const std::string key = EnsureKey();
+  if (key.empty())
+  {
+    err = "Couldn't reach TONE3000";
+    return false;
+  }
+  std::string resp;
+  int status = 0;
+  const std::string url = std::string(ApiBase())
+                          + "/rest/v1/tags?select=name,category_rank&category_rank=not.is.null"
+                            "&order=category_rank.asc&limit=100";
+  if (!HttpGetUrl(url, key, resp, &status) || status != 200)
+  {
+    err = "Couldn't load the tag list";
+    return false;
+  }
+  try
+  {
+    nlohmann::json j = nlohmann::json::parse(resp);
+    for (const auto& row : j)
+      if (row.contains("name") && row["name"].is_string())
+        out.push_back(row["name"].get<std::string>());
+    return true;
+  }
+  catch (const std::exception&)
+  {
+    err = "Couldn't read the tag list";
+    return false;
+  }
 }
 
 inline bool FetchModels(long long toneId, std::vector<ModelFile>& out, std::string& err)
@@ -519,7 +565,7 @@ inline std::string GearToType(const std::string& gear)
     return "amp_cab";
   if (g.find("pedal") != std::string::npos)
     return "pedal";
-  if (g.find("cab") != std::string::npos || g.find("ir") != std::string::npos)
+  if (g.find("cab") != std::string::npos || g.find("ir") != std::string::npos || g.find("space") != std::string::npos)
     return "ir";
   if (g.find("amp") != std::string::npos)
     return "amp";
@@ -568,7 +614,8 @@ inline bool DownloadTone(const SearchResult& tone, std::string& err)
         byName[m.name] = m;
     }
     int downloaded = 0;
-    std::string firstModel;
+    std::string firstModel; // first .nam
+    std::string firstIR; // first .wav (IR tones download as wav files)
     for (const auto& pair : byName)
     {
       const ModelFile& m = pair.second;
@@ -576,7 +623,10 @@ inline bool DownloadTone(const SearchResult& tone, std::string& err)
       if (DownloadUrlToFile(m.url, folder / tonegallery::UTF8ToPath(fileName)))
       {
         downloaded++;
-        if (firstModel.empty())
+        const bool isWav = fileName.size() > 4 && fileName.compare(fileName.size() - 4, 4, ".wav") == 0;
+        if (isWav && firstIR.empty())
+          firstIR = fileName;
+        if (!isWav && firstModel.empty())
           firstModel = fileName;
       }
     }
@@ -597,6 +647,8 @@ inline bool DownloadTone(const SearchResult& tone, std::string& err)
     j["url"] = "https://www.tone3000.com/tones/" + Slugify(tone.title) + "-" + std::to_string(tone.id);
     if (!firstModel.empty())
       j["model"] = firstModel;
+    if (!firstIR.empty())
+      j["ir"] = firstIR;
     std::ofstream f(folder / "tone.json");
     f << j.dump(2);
     return true;
@@ -691,7 +743,17 @@ struct BrowserShared
   std::string query;
   std::string gear; // active gear_filters value ("" = all)
   std::string order; // active order_by value ("" = default)
+  std::string platform; // "nam" or "ir"
+  std::vector<std::string> tags; // required tag names (empty = all)
   std::string error;
+};
+
+// The curated tag list (fetched once per session; same ~50 tags the site shows).
+struct TagsShared
+{
+  std::mutex mtx;
+  std::atomic<int> status{0}; // 0=none 1=fetching 2=done 3=error
+  std::vector<std::string> names;
 };
 
 // Model-file list for the detail page (fetched when a tone is opened).
@@ -743,25 +805,38 @@ public:
 
   // --- Filter chips -------------------------------------------------------
   static constexpr int kNumGearChips = 6;
-  static constexpr int kNumSortChips = 3;
-  static const char* GearChipLabel(int i)
+  static constexpr int kNumSortChips = 4;
+  static constexpr int kNumFormatChips = 2;
+  const char* GearChipLabelFor(int i) const
   {
-    static const char* kLabels[kNumGearChips] = {"ALL", "AMP+CAB", "AMPS", "PEDALS", "OUTBOARD", "EXPERIMENTAL"};
-    return kLabels[i];
+    static const char* kNAM[kNumGearChips] = {"ALL", "AMP+CAB", "AMPS", "PEDALS", "OUTBOARD", "EXPERIMENTAL"};
+    static const char* kIR[kNumGearChips] = {"ALL", "CABS", "SPACES", "PEDALS", "OUTBOARD", "EXPERIMENTAL"};
+    return mFormatSel == 1 ? kIR[i] : kNAM[i];
   }
-  static const char* GearChipValue(int i)
+  const char* GearChipValueFor(int i) const
   {
-    static const char* kValues[kNumGearChips] = {"", "amp-cab", "amp", "pedal", "outboard", "experimental"};
-    return kValues[i];
+    static const char* kNAM[kNumGearChips] = {"", "amp-cab", "amp", "pedal", "outboard", "experimental"};
+    static const char* kIR[kNumGearChips] = {"", "cab", "space", "pedal", "outboard", "experimental"};
+    return mFormatSel == 1 ? kIR[i] : kNAM[i];
   }
   static const char* SortChipLabel(int i)
   {
-    static const char* kLabels[kNumSortChips] = {"TRENDING", "NEWEST", "OLDEST"};
+    static const char* kLabels[kNumSortChips] = {"TRENDING", "NEWEST", "OLDEST", "MOST DL"};
     return kLabels[i];
   }
   static const char* SortChipValue(int i)
   {
-    static const char* kValues[kNumSortChips] = {"trending", "newest", "oldest"};
+    static const char* kValues[kNumSortChips] = {"trending", "newest", "oldest", "downloads-all-time"};
+    return kValues[i];
+  }
+  static const char* FormatChipLabel(int i)
+  {
+    static const char* kLabels[kNumFormatChips] = {"NAM", "IRS"};
+    return kLabels[i];
+  }
+  static const char* FormatChipValue(int i)
+  {
+    static const char* kValues[kNumFormatChips] = {"nam", "ir"};
     return kValues[i];
   }
 
@@ -770,23 +845,27 @@ public:
     mHasSearched = true;
     auto shared = mShared;
     const int generation = ++shared->generation;
-    const std::string gear = GearChipValue(mGearSel);
+    const std::string gear = GearChipValueFor(mGearSel);
     const std::string order = SortChipValue(mSortSel);
+    const std::string platform = FormatChipValue(mFormatSel);
+    const std::vector<std::string> tags(mSelectedTags.begin(), mSelectedTags.end());
     {
       std::lock_guard<std::mutex> lock(shared->mtx);
       shared->query = query;
       shared->gear = gear;
       shared->order = order;
+      shared->platform = platform;
+      shared->tags = tags;
       shared->error.clear();
       shared->page = 1;
     }
     shared->busy = true;
     mScroll = 0.0f;
-    t3k::Worker::Get().Enqueue([shared, query, gear, order, generation]() {
+    t3k::Worker::Get().Enqueue([shared, query, gear, order, platform, tags, generation]() {
       std::vector<t3k::SearchResult> results;
       long long total = 0;
       std::string err;
-      const bool ok = t3k::SearchTones(query, gear, order, 1, kPageSize, results, total, err);
+      const bool ok = t3k::SearchTones(query, gear, order, platform, tags, 1, kPageSize, results, total, err);
       std::lock_guard<std::mutex> lock(shared->mtx);
       if (shared->generation == generation)
       {
@@ -821,20 +900,23 @@ public:
       return;
     const int generation = shared->generation.load();
     int nextPage;
-    std::string query, gear, order;
+    std::string query, gear, order, platform;
+    std::vector<std::string> tags;
     {
       std::lock_guard<std::mutex> lock(shared->mtx);
       nextPage = shared->page + 1;
       query = shared->query;
       gear = shared->gear;
       order = shared->order;
+      platform = shared->platform;
+      tags = shared->tags;
     }
     shared->busy = true;
-    t3k::Worker::Get().Enqueue([shared, query, gear, order, nextPage, generation]() {
+    t3k::Worker::Get().Enqueue([shared, query, gear, order, platform, tags, nextPage, generation]() {
       std::vector<t3k::SearchResult> results;
       long long total = 0;
       std::string err;
-      const bool ok = t3k::SearchTones(query, gear, order, nextPage, kPageSize, results, total, err);
+      const bool ok = t3k::SearchTones(query, gear, order, platform, tags, nextPage, kPageSize, results, total, err);
       std::lock_guard<std::mutex> lock(shared->mtx);
       if (shared->generation == generation)
       {
@@ -908,7 +990,19 @@ public:
     g.DrawText(fieldText, query.empty() ? "Search amps, pedals, cabs... (click, type, press Enter)" : query.c_str(),
                field.GetReducedFromLeft(32.0f).GetReducedFromRight(10.0f));
 
-    // Filter chips: gear types on the left, sort order on the right.
+    // Row 1: format toggle (NAM / IRS) then gear-type chips.
+    for (int i = 0; i < kNumFormatChips; i++)
+    {
+      const IRECT chip = FormatChipRect(i);
+      const bool sel = i == mFormatSel;
+      const bool over = mMouseOverFormatChip == i;
+      g.FillRoundRect(sel ? accent : IColor(255, 26, 27, 33), chip, 4.0f);
+      if (over && !sel)
+        g.DrawRoundRect(accent, chip, 4.0f);
+      const IText chipText(7.5f, sel ? COLOR_BLACK : (over ? COLOR_WHITE : IColor(255, 150, 153, 162)), "Inter-Bold",
+                           EAlign::Center, EVAlign::Middle);
+      g.DrawText(chipText, FormatChipLabel(i), chip);
+    }
     for (int i = 0; i < kNumGearChips; i++)
     {
       const IRECT chip = GearChipRect(i);
@@ -919,8 +1013,10 @@ public:
         g.DrawRoundRect(accent, chip, chip.H() * 0.5f);
       const IText chipText(7.5f, sel ? COLOR_BLACK : (over ? COLOR_WHITE : IColor(255, 150, 153, 162)), "Inter-Bold",
                            EAlign::Center, EVAlign::Middle);
-      g.DrawText(chipText, GearChipLabel(i), chip);
+      g.DrawText(chipText, GearChipLabelFor(i), chip);
     }
+
+    // Row 2: sort order, TAGS toggle, then the status text on the right.
     for (int i = 0; i < kNumSortChips; i++)
     {
       const IRECT chip = SortChipRect(i);
@@ -932,29 +1028,38 @@ public:
                            EAlign::Center, EVAlign::Middle);
       g.DrawText(chipText, SortChipLabel(i), chip);
     }
+    {
+      const IRECT chip = TagsChipRect();
+      const bool active = !mSelectedTags.empty() || mTagsOpen;
+      g.FillRoundRect(active ? accent : IColor(255, 32, 33, 41), chip, chip.H() * 0.5f);
+      if (mMouseOverTagsBtn && !active)
+        g.DrawRoundRect(accent, chip, chip.H() * 0.5f);
+      const IText chipText(7.5f, active ? COLOR_BLACK : (mMouseOverTagsBtn ? COLOR_WHITE : IColor(255, 150, 153, 162)),
+                           "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.DrawText(chipText, TagsChipLabel().c_str(), chip);
+    }
 
-    // Status line
-    const IText statusText(9.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Middle);
-    const IRECT statusArea = content.GetReducedFromTop(92.0f).GetFromTop(14.0f);
+    // Status (right side of row 2)
+    const IText statusText(9.0f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Far, EVAlign::Middle);
+    const IRECT statusArea = StatusRect();
     if (mShared->busy)
     {
-      // spinner
       mSpinnerPhase += 14.0f;
       if (mSpinnerPhase > 360.0f)
         mSpinnerPhase -= 360.0f;
       g.DrawArc(
-        accent, statusArea.L + 7.0f, statusArea.MH(), 6.0f, mSpinnerPhase, mSpinnerPhase + 270.0f, nullptr, 2.0f);
-      g.DrawText(statusText, "Searching TONE3000...", statusArea.GetReducedFromLeft(20.0f));
+        accent, statusArea.R - 8.0f, statusArea.MH(), 6.0f, mSpinnerPhase, mSpinnerPhase + 270.0f, nullptr, 2.0f);
+      g.DrawText(statusText, "Searching TONE3000...", statusArea.GetReducedFromRight(20.0f));
     }
     else if (!error.empty())
     {
-      const IText errText(9.5f, IColor(255, 232, 90, 90), "Inter-Regular", EAlign::Near, EVAlign::Middle);
+      const IText errText(9.0f, IColor(255, 232, 90, 90), "Inter-Regular", EAlign::Far, EVAlign::Middle);
       g.DrawText(errText, error.c_str(), statusArea);
     }
     else if (numResults > 0)
     {
       std::stringstream ss;
-      ss << numResults << " of " << total << " tones - click one for details";
+      ss << numResults << " of " << total << (mFormatSel == 1 ? " IRs" : " tones") << " - click for details";
       g.DrawText(statusText, ss.str().c_str(), statusArea);
     }
 
@@ -997,7 +1102,76 @@ public:
     }
     g.PathClipRegion();
 
+    // Tags panel (overlays the top of the grid while open)
+    if (mTagsOpen)
+      DrawTagsPanel(g, accent);
+
     FinishDraw(anyDownloading);
+  }
+
+  void DrawTagsPanel(IGraphics& g, const IColor& accent)
+  {
+    const IRECT panel = TagPanelRect();
+    g.FillRoundRect(IColor(255, 23, 24, 28), panel, 8.0f);
+    g.DrawRoundRect(IColor(40, 255, 255, 255), panel, 8.0f);
+
+    const IRECT inner = panel.GetPadded(-10.0f);
+    const IText headText(8.5f, IColor(255, 139, 142, 152), "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    g.DrawText(headText, "FILTER BY TAGS", inner.GetFromTop(14.0f));
+    if (!mSelectedTags.empty())
+    {
+      const IRECT clear = TagClearRect();
+      const IText clearText(8.0f, mMouseOverClear ? COLOR_WHITE : accent, "Inter-Bold", EAlign::Far, EVAlign::Middle);
+      g.DrawText(clearText, "CLEAR ALL", clear);
+    }
+
+    auto tagsShared = mTagsShared;
+    const int status = tagsShared != nullptr ? tagsShared->status.load() : 0;
+    if (status == 1)
+    {
+      mSpinnerPhase += 10.0f;
+      if (mSpinnerPhase > 360.0f)
+        mSpinnerPhase -= 360.0f;
+      g.DrawArc(accent, inner.L + 8.0f, inner.T + 34.0f, 6.0f, mSpinnerPhase, mSpinnerPhase + 270.0f, nullptr, 2.0f);
+      const IText loadText(8.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Middle);
+      g.DrawText(
+        loadText, "Loading tags from TONE3000...", IRECT(inner.L + 20.0f, inner.T + 26.0f, inner.R, inner.T + 42.0f));
+    }
+    else if (status == 3)
+    {
+      const IText errText(8.5f, IColor(255, 232, 90, 90), "Inter-Regular", EAlign::Near, EVAlign::Middle);
+      g.DrawText(errText, "Couldn't load the tag list - try reopening.",
+                 IRECT(inner.L, inner.T + 26.0f, inner.R, inner.T + 42.0f));
+    }
+    else if (status == 2)
+    {
+      std::vector<std::pair<std::string, IRECT>> chips;
+      mTagContentH = LayoutTagChips(chips);
+      g.PathClipRegion(inner.GetReducedFromTop(18.0f));
+      for (const auto& c : chips)
+      {
+        const bool sel = mSelectedTags.count(c.first) > 0;
+        const bool over = c.first == mHoverTag;
+        g.FillRoundRect(sel ? accent : IColor(255, 40, 41, 49), c.second, c.second.H() * 0.5f);
+        if (over && !sel)
+          g.DrawRoundRect(accent, c.second, c.second.H() * 0.5f);
+        const IText tagText(7.0f, sel ? COLOR_BLACK : (over ? COLOR_WHITE : IColor(255, 170, 173, 182)),
+                            "Inter-Regular", EAlign::Center, EVAlign::Middle);
+        g.DrawText(tagText, c.first.c_str(), c.second);
+      }
+      // panel scrollbar
+      const IRECT scrollArea = inner.GetReducedFromTop(18.0f);
+      if (mTagContentH > scrollArea.H())
+      {
+        const float frac = scrollArea.H() / mTagContentH;
+        const float barH = std::max(14.0f, frac * scrollArea.H());
+        const float travel = scrollArea.H() - barH;
+        const float pos = (mTagScroll / (mTagContentH - scrollArea.H())) * travel;
+        g.FillRoundRect(accent.WithOpacity(0.5f),
+                        IRECT(panel.R - 5.0f, scrollArea.T + pos, panel.R - 3.0f, scrollArea.T + pos + barH), 1.0f);
+      }
+      g.PathClipRegion();
+    }
   }
 
   // Common end-of-draw work for both pages: announce finished downloads to
@@ -1016,6 +1190,8 @@ public:
         keepPolling = true;
     }
     if (mDetailOpen && mDetailModels != nullptr && mDetailModels->status.load() == 1)
+      keepPolling = true;
+    if (mTagsOpen && mTagsShared != nullptr && mTagsShared->status.load() == 1)
       keepPolling = true;
     if (mShared->busy || keepPolling)
       SetDirty(false); // keep animating/polling
@@ -1045,6 +1221,60 @@ public:
       }
       return;
     }
+    // Tags panel gets first claim on clicks while it's open.
+    if (mTagsOpen)
+    {
+      if (TagsChipRect().Contains(x, y))
+      {
+        mTagsOpen = false;
+        SetDirty(false);
+        return;
+      }
+      if (TagPanelRect().Contains(x, y))
+      {
+        if (!mSelectedTags.empty() && TagClearRect().Contains(x, y))
+        {
+          mSelectedTags.clear();
+          RestartSearch();
+          return;
+        }
+        std::vector<std::pair<std::string, IRECT>> chips;
+        LayoutTagChips(chips);
+        const IRECT inner = TagPanelRect().GetPadded(-10.0f).GetReducedFromTop(18.0f);
+        for (const auto& c : chips)
+        {
+          if (c.second.Contains(x, y) && inner.Contains(x, y))
+          {
+            if (mSelectedTags.count(c.first))
+              mSelectedTags.erase(c.first);
+            else
+              mSelectedTags.insert(c.first);
+            RestartSearch();
+            return;
+          }
+        }
+        return; // click inside the panel but not on a chip: swallow it
+      }
+      // click outside the panel closes it (and does nothing else)
+      if (GridRect().Contains(x, y))
+      {
+        mTagsOpen = false;
+        SetDirty(false);
+        return;
+      }
+    }
+    for (int i = 0; i < kNumFormatChips; i++)
+    {
+      if (FormatChipRect(i).Contains(x, y))
+      {
+        if (mFormatSel != i)
+        {
+          mFormatSel = i;
+          RestartSearch();
+        }
+        return;
+      }
+    }
     for (int i = 0; i < kNumGearChips; i++)
     {
       if (GearChipRect(i).Contains(x, y))
@@ -1068,6 +1298,11 @@ public:
         }
         return;
       }
+    }
+    if (TagsChipRect().Contains(x, y))
+    {
+      OpenTagsPanel();
+      return;
     }
     if (SearchFieldRect().Contains(x, y))
     {
@@ -1123,6 +1358,18 @@ public:
       }
       return;
     }
+    if (mTagsOpen && TagPanelRect().Contains(x, y))
+    {
+      const float area = TagPanelRect().GetPadded(-10.0f).GetReducedFromTop(18.0f).H();
+      const float maxScroll = std::max(0.0f, mTagContentH - area);
+      const float next = std::min(maxScroll, std::max(0.0f, mTagScroll - d * 30.0f));
+      if (next != mTagScroll)
+      {
+        mTagScroll = next;
+        SetDirty(false);
+      }
+      return;
+    }
     const float maxScroll = std::max(0.0f, ContentHeight() - GridRect().H());
     const float next = std::min(maxScroll, std::max(0.0f, mScroll - d * 44.0f));
     if (next != mScroll)
@@ -1137,7 +1384,9 @@ public:
     IControl::OnMouseOver(x, y, mod);
     const bool overClose = CloseRect().Contains(x, y);
     bool overField = false, overMore = false, overBack = false, overDL = false;
-    int overCard = -1, overGearChip = -1, overSortChip = -1;
+    bool overTagsBtn = false, overClear = false;
+    int overCard = -1, overGearChip = -1, overSortChip = -1, overFormatChip = -1;
+    std::string hoverTag;
     if (mDetailOpen)
     {
       overBack = BackRect().Contains(x, y);
@@ -1146,13 +1395,27 @@ public:
     else
     {
       overField = SearchFieldRect().Contains(x, y);
+      for (int i = 0; i < kNumFormatChips; i++)
+        if (FormatChipRect(i).Contains(x, y))
+          overFormatChip = i;
       for (int i = 0; i < kNumGearChips; i++)
         if (GearChipRect(i).Contains(x, y))
           overGearChip = i;
       for (int i = 0; i < kNumSortChips; i++)
         if (SortChipRect(i).Contains(x, y))
           overSortChip = i;
-      if (GridRect().Contains(x, y))
+      overTagsBtn = TagsChipRect().Contains(x, y);
+      if (mTagsOpen && TagPanelRect().Contains(x, y))
+      {
+        overClear = !mSelectedTags.empty() && TagClearRect().Contains(x, y);
+        std::vector<std::pair<std::string, IRECT>> chips;
+        LayoutTagChips(chips);
+        const IRECT inner = TagPanelRect().GetPadded(-10.0f).GetReducedFromTop(18.0f);
+        for (const auto& c : chips)
+          if (c.second.Contains(x, y) && inner.Contains(x, y))
+            hoverTag = c.first;
+      }
+      else if (GridRect().Contains(x, y) && !mTagsOpen)
       {
         std::lock_guard<std::mutex> lock(mShared->mtx);
         overCard = CardAt(x, y);
@@ -1163,7 +1426,9 @@ public:
     }
     if (overClose != mMouseOverClose || overField != mMouseOverField || overCard != mMouseOverCard
         || overMore != mMouseOverMore || overBack != mMouseOverBack || overDL != mMouseOverDL
-        || overGearChip != mMouseOverGearChip || overSortChip != mMouseOverSortChip)
+        || overGearChip != mMouseOverGearChip || overSortChip != mMouseOverSortChip
+        || overFormatChip != mMouseOverFormatChip || overTagsBtn != mMouseOverTagsBtn || overClear != mMouseOverClear
+        || hoverTag != mHoverTag)
     {
       mMouseOverClose = overClose;
       mMouseOverField = overField;
@@ -1173,6 +1438,10 @@ public:
       mMouseOverDL = overDL;
       mMouseOverGearChip = overGearChip;
       mMouseOverSortChip = overSortChip;
+      mMouseOverFormatChip = overFormatChip;
+      mMouseOverTagsBtn = overTagsBtn;
+      mMouseOverClear = overClear;
+      mHoverTag = hoverTag;
       SetDirty(false);
     }
   }
@@ -1188,6 +1457,10 @@ public:
     mMouseOverDL = false;
     mMouseOverGearChip = -1;
     mMouseOverSortChip = -1;
+    mMouseOverFormatChip = -1;
+    mMouseOverTagsBtn = false;
+    mMouseOverClear = false;
+    mHoverTag.clear();
     SetDirty(false);
   }
 
@@ -1215,25 +1488,123 @@ private:
 
   // --- Filter chip geometry ------------------------------------------------
   static float ChipW(const char* label) { return 14.0f + 4.4f * (float)strlen(label); }
-  IRECT ChipRowRect() const { return mRECT.GetPadded(-24.0f).GetReducedFromTop(68.0f).GetFromTop(18.0f); }
+  IRECT ChipRow1() const { return mRECT.GetPadded(-24.0f).GetReducedFromTop(66.0f).GetFromTop(16.0f); }
+  IRECT ChipRow2() const { return mRECT.GetPadded(-24.0f).GetReducedFromTop(86.0f).GetFromTop(16.0f); }
+
+  IRECT FormatChipRect(int i) const
+  {
+    const IRECT row = ChipRow1();
+    float x = row.L;
+    for (int k = 0; k < i; k++)
+      x += ChipW(FormatChipLabel(k)) + 2.0f;
+    return IRECT(x, row.T, x + ChipW(FormatChipLabel(i)), row.B);
+  }
+
+  float GearChipsStartX() const
+  {
+    float x = ChipRow1().L;
+    for (int k = 0; k < kNumFormatChips; k++)
+      x += ChipW(FormatChipLabel(k)) + 2.0f;
+    return x + 10.0f; // gap between the format toggle and the gear chips
+  }
 
   IRECT GearChipRect(int i) const
   {
-    const IRECT row = ChipRowRect();
-    float x = row.L;
+    const IRECT row = ChipRow1();
+    float x = GearChipsStartX();
     for (int k = 0; k < i; k++)
-      x += ChipW(GearChipLabel(k)) + 6.0f;
-    return IRECT(x, row.T, x + ChipW(GearChipLabel(i)), row.B);
+      x += ChipW(GearChipLabelFor(k)) + 5.0f;
+    return IRECT(x, row.T, x + ChipW(GearChipLabelFor(i)), row.B);
   }
 
   IRECT SortChipRect(int i) const
   {
-    const IRECT row = ChipRowRect();
-    float x = row.R;
-    for (int k = kNumSortChips - 1; k > i; k--)
-      x -= ChipW(SortChipLabel(k)) + 6.0f;
-    x -= ChipW(SortChipLabel(i));
+    const IRECT row = ChipRow2();
+    float x = row.L;
+    for (int k = 0; k < i; k++)
+      x += ChipW(SortChipLabel(k)) + 5.0f;
     return IRECT(x, row.T, x + ChipW(SortChipLabel(i)), row.B);
+  }
+
+  std::string TagsChipLabel() const
+  {
+    if (mSelectedTags.empty())
+      return "TAGS";
+    return "TAGS (" + std::to_string(mSelectedTags.size()) + ")";
+  }
+
+  IRECT TagsChipRect() const
+  {
+    const IRECT row = ChipRow2();
+    float x = row.L;
+    for (int k = 0; k < kNumSortChips; k++)
+      x += ChipW(SortChipLabel(k)) + 5.0f;
+    x += 8.0f;
+    return IRECT(x, row.T, x + ChipW(TagsChipLabel().c_str()), row.B);
+  }
+
+  IRECT StatusRect() const
+  {
+    const IRECT row = ChipRow2();
+    return IRECT(TagsChipRect().R + 10.0f, row.T, row.R, row.B);
+  }
+
+  // --- Tags panel ----------------------------------------------------------
+  IRECT TagPanelRect() const
+  {
+    const IRECT grid = GridRect();
+    return grid.GetFromTop(std::min(grid.H(), 170.0f));
+  }
+
+  IRECT TagClearRect() const { return TagPanelRect().GetPadded(-10.0f).GetFromTop(14.0f).GetFromRight(70.0f); }
+
+  // Lays out the tag chips (with the current scroll applied); returns the
+  // total content height so scrolling can be clamped.
+  float LayoutTagChips(std::vector<std::pair<std::string, IRECT>>& out) const
+  {
+    const IRECT inner = TagPanelRect().GetPadded(-10.0f).GetReducedFromTop(18.0f);
+    std::vector<std::string> names;
+    if (mTagsShared != nullptr)
+    {
+      std::lock_guard<std::mutex> lock(mTagsShared->mtx);
+      names = mTagsShared->names;
+    }
+    float cx = inner.L;
+    float cy = inner.T - mTagScroll;
+    float rowH = 19.0f;
+    for (const auto& name : names)
+    {
+      const float w = 12.0f + 4.4f * (float)name.size();
+      if (cx + w > inner.R && cx > inner.L)
+      {
+        cx = inner.L;
+        cy += rowH;
+      }
+      out.push_back({name, IRECT(cx, cy, cx + w, cy + 14.0f)});
+      cx += w + 5.0f;
+    }
+    return (cy + 14.0f + mTagScroll) - inner.T + 4.0f;
+  }
+
+  void OpenTagsPanel()
+  {
+    mTagsOpen = true;
+    mTagScroll = 0.0f;
+    if (mTagsShared == nullptr || mTagsShared->status == 3)
+    {
+      auto ts = std::make_shared<t3k::TagsShared>();
+      mTagsShared = ts;
+      ts->status = 1;
+      t3k::Worker::Get().Enqueue([ts]() {
+        std::vector<std::string> names;
+        std::string err;
+        const bool ok = t3k::FetchRankedTags(names, err);
+        std::lock_guard<std::mutex> lock(ts->mtx);
+        ts->names = std::move(names);
+        ts->status = ok ? 2 : 3;
+      });
+    }
+    SetDirty(false);
   }
 
   // --- Detail page ---------------------------------------------------------
@@ -1423,11 +1794,12 @@ private:
             g.DrawText(rowText, tonegallery::Ellipsize(pair.second.name, 70).c_str(),
                        row.GetReducedFromLeft(16.0f).GetReducedFromRight(34.0f));
             const bool isA2 = pair.second.arch == "2";
+            const bool isWav = t3k::UrlExtension(pair.second.url, ".nam") == ".wav";
             const IRECT arcChip = row.GetFromRight(28.0f).GetCentredInside(24.0f, 11.0f);
             g.FillRoundRect(isA2 ? accent.WithOpacity(0.25f) : IColor(255, 55, 57, 66), arcChip, 4.0f);
             const IText arcText(
               6.5f, isA2 ? accent : IColor(255, 150, 153, 162), "Inter-Bold", EAlign::Center, EVAlign::Middle);
-            g.DrawText(arcText, isA2 ? "A2" : "A1", arcChip);
+            g.DrawText(arcText, isWav ? "IR" : (isA2 ? "A2" : "A1"), arcChip);
           }
           y += 21.0f;
         }
@@ -1693,6 +2065,13 @@ private:
   float mSpinnerPhase = 0.0f;
   int mGearSel = 0;
   int mSortSel = 0;
+  int mFormatSel = 0; // 0 = NAM captures, 1 = impulse responses
+  std::set<std::string> mSelectedTags;
+  bool mTagsOpen = false;
+  float mTagScroll = 0.0f;
+  float mTagContentH = 0.0f;
+  std::shared_ptr<t3k::TagsShared> mTagsShared;
+  std::string mHoverTag;
   bool mDetailOpen = false;
   t3k::SearchResult mDetailTone;
   std::shared_ptr<t3k::ModelsShared> mDetailModels;
@@ -1705,6 +2084,9 @@ private:
   bool mMouseOverDL = false;
   int mMouseOverGearChip = -1;
   int mMouseOverSortChip = -1;
+  int mMouseOverFormatChip = -1;
+  bool mMouseOverTagsBtn = false;
+  bool mMouseOverClear = false;
   int mMouseOverCard = -1;
   IFileDialogCompletionHandlerFunc mLoadModelFunc;
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
