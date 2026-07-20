@@ -1169,6 +1169,10 @@ public:
       g.PathClipRegion(photo);
       g.DrawFittedBitmap(*pBitmap, cover);
       g.PathClipRegion();
+      // Dark gradient over the top of the photo (darkest at the very top)
+      g.PathRect(photo.GetFromTop(64.0f));
+      g.PathFill(IPattern::CreateLinearGradient(photo.L, photo.T, photo.L, photo.T + 64.0f,
+                                                {{COLOR_BLACK.WithOpacity(0.6f), 0.0f}, {COLOR_TRANSPARENT, 1.0f}}));
       // Fade the bottom of the photo into the panel
       g.PathRect(photo.GetFromBottom(40.0f));
       g.PathFill(IPattern::CreateLinearGradient(
