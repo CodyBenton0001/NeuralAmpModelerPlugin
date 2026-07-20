@@ -293,6 +293,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new ThemedMeterControl(inputMeterArea, style), kCtrlTagInputMeter);
     pGraphics->AttachControl(new ThemedMeterControl(outputMeterArea, style), kCtrlTagOutputMeter);
 
+    // Titlebar extras: accent color picker and rack-view toggle.
+    pGraphics->AttachControl(new NAMAccentPickerControl(settingsButtonArea.GetTranslated(-28.0f, 0.0f)));
+    pGraphics->AttachControl(new NAMRackButtonControl(settingsButtonArea.GetTranslated(-56.0f, 0.0f)));
+
     // Settings/help/about box
     pGraphics->AttachControl(new NAMCircleButtonControl(
       settingsButtonArea,
@@ -307,6 +311,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(
       new NAMFavoritesBarControl(favoritesArea, loadModelCompletionHandler, loadIRCompletionHandler),
       kCtrlTagFavoritesBar);
+
+    // Tone detail panel: slides in to the right of the sidebar when a tone
+    // card is clicked; hosts the variant picker.
+    pGraphics
+      ->AttachControl(new NAMToneDetailControl(b.GetReducedFromLeft(kSidebarWidth).GetFromLeft(kDetailPanelWidth),
+                                               loadModelCompletionHandler, loadIRCompletionHandler),
+                      kCtrlTagToneDetail)
+      ->Hide(true);
 
     // Tone Gallery (see NAMToneGalleryControl.h): opener button in the top-left
     // corner of the main UI, then the (initially hidden) gallery overlay. A
@@ -335,10 +347,38 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->AttachControl(new NAMKnobControl(slimKnobArea, kSlim, "Slim", style, knobBackgroundBitmap), kCtrlTagSlimKnob)
       ->Hide(true);
 
+    // Rack view overlay (topmost; shown by shrinking the window).
+    pGraphics
+      ->AttachControl(
+        new NAMRackViewControl(b.GetFromTop(kRackViewHeight), loadModelCompletionHandler, loadIRCompletionHandler),
+        kCtrlTagRackView)
+      ->Hide(true);
+
     pGraphics->ForAllControlsFunc([](IControl* pControl) {
       pControl->SetMouseEventsWhenDisabled(true);
       pControl->SetMouseOverWhenDisabled(true);
     });
+
+    // Apply a saved custom accent color to all style-based controls.
+    {
+      const IColor ac = tonegallery::AccentColor();
+      const IColor def = PluginColors::NAM_THEMECOLOR;
+      if (ac.R != def.R || ac.G != def.G || ac.B != def.B)
+      {
+        char code[10];
+        snprintf(code, sizeof(code), "#%02X%02X%02X", ac.R, ac.G, ac.B);
+        mHighLightColor.Set(code);
+        pGraphics->ForStandardControlsFunc([&](IControl* pControl) {
+          if (auto* pVectorBase = pControl->As<IVectorBase>())
+          {
+            pVectorBase->SetColor(kX1, ac);
+            pVectorBase->SetColor(kPR, ac.WithOpacity(0.3f));
+            pVectorBase->SetColor(kFR, ac.WithOpacity(0.4f));
+            pVectorBase->SetColor(kX3, ac.WithContrast(0.1f));
+          }
+        });
+      }
+    }
 
     // pGraphics->GetControlWithTag(kCtrlTagOutNorm)->SetMouseEventsWhenDisabled(false);
     // pGraphics->GetControlWithTag(kCtrlTagCalibrateInput)->SetMouseEventsWhenDisabled(false);
