@@ -24,7 +24,7 @@ const IColor CARD(255, 32, 33, 41); // tone cards, file rows, meters
 const IColor KNOB_FACE(255, 24, 25, 30);
 const IColor LINE(18, 255, 255, 255); // hairline borders (7% white)
 const IColor TRACK(20, 255, 255, 255); // knob track arc
-const IColor TEXT(255, 236, 238, 242);
+const IColor TEXT_MAIN(255, 236, 238, 242);
 const IColor TEXT_DIM(255, 139, 142, 152);
 const IColor TEXT_FAINT(255, 90, 93, 102);
 
@@ -75,7 +75,7 @@ public:
   void Draw(IGraphics& g) override
   {
     const float size = 17.0f;
-    IText t(size, namtheme::TEXT, namtheme::kFontBold, EAlign::Near, EVAlign::Middle);
+    IText t(size, namtheme::TEXT_MAIN, namtheme::kFontBold, EAlign::Near, EVAlign::Middle);
     const char* seg[3] = {"NEURAL ", "AMP ", "MODELER"};
     float widths[3];
     float total = 0.0f;
@@ -89,7 +89,7 @@ public:
     float x = mRECT.MW() - 0.5f * total;
     for (int i = 0; i < 3; i++)
     {
-      t.mFGColor = (i == 1) ? namtheme::Accent() : namtheme::TEXT;
+      t.mFGColor = (i == 1) ? namtheme::Accent() : namtheme::TEXT_MAIN;
       g.DrawText(t, seg[i], IRECT(x, mRECT.T, x + widths[i] + 2.0f, mRECT.B));
       x += widths[i];
     }
