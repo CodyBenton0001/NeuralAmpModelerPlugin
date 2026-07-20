@@ -48,6 +48,7 @@ const int kCtrlTagToneDetail = 1004;
 const int kCtrlTagRackView = 1005;
 // 1006 = kCtrlTagTone3000 (NAMTone3000Browser.h)
 const int kCtrlTagChainView = 1007; // NAMChainView.h
+const int kCtrlTagChainBanner = 1008; // NAMChainView.h ("editing unit N" strip)
 
 // Window layout: the always-visible tone list on the left and the favorites
 // bar under the main UI. The main plugin UI keeps its stock 600x400 size;
