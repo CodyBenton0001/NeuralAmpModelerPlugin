@@ -17,6 +17,7 @@
 
 #include "NeuralAmpModelerControls.h"
 #include "NAMToneGalleryControl.h"
+#include "NAMTheme.h"
 
 using namespace iplug;
 using namespace igraphics;
@@ -40,8 +41,9 @@ const IVStyle style =
   IVStyle{true, // Show label
           true, // Show value
           colorSpec,
-          {DEFAULT_TEXT_SIZE + 3.f, EVAlign::Middle, PluginColors::NAM_THEMEFONTCOLOR}, // Knob label text5
-          {DEFAULT_TEXT_SIZE + 3.f, EVAlign::Bottom, PluginColors::NAM_THEMEFONTCOLOR}, // Knob value text
+          {11.f, PluginColors::NAM_THEMEFONTCOLOR.WithOpacity(0.65f), "Inter-Bold", EAlign::Center,
+           EVAlign::Middle}, // Knob label text
+          {11.f, PluginColors::NAM_THEMEFONTCOLOR, "Inter-Regular", EAlign::Center, EVAlign::Bottom}, // Knob value text
           DEFAULT_HIDE_CURSOR,
           DEFAULT_DRAW_FRAME,
           false,
@@ -117,6 +119,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     pGraphics->LoadFont("Roboto-Regular", ROBOTO_FN);
     pGraphics->LoadFont("Michroma-Regular", MICHROMA_FN);
+    // Modern UI font; fall back to Roboto if the Inter files aren't bundled.
+    if (!pGraphics->LoadFont("Inter-Regular", INTER_FN))
+      pGraphics->LoadFont("Inter-Regular", ROBOTO_FN);
+    if (!pGraphics->LoadFont("Inter-Bold", INTER_BOLD_FN))
+      pGraphics->LoadFont("Inter-Bold", ROBOTO_FN);
 
     const auto gearSVG = pGraphics->LoadSVG(GEAR_FN);
     const auto fileSVG = pGraphics->LoadSVG(FILE_FN);
@@ -220,12 +227,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       }
     };
 
-    // Dark panel behind everything; the stock textured background covers the
-    // main UI region at its native 600x400 size (no stretching).
-    pGraphics->AttachPanelBackground(IColor(255, 18, 18, 20));
-    pGraphics->AttachControl(new IBitmapControl(mainB, backgroundBitmap));
-    pGraphics->AttachControl(new IBitmapControl(mainB, linesBitmap));
-    pGraphics->AttachControl(new IVLabelControl(titleArea, "NEURAL AMP MODELER", titleStyle));
+    // Nightfall theme: flat dark window with a rounded card behind the knobs.
+    pGraphics->AttachPanelBackground(namtheme::BG);
+    pGraphics->AttachControl(
+      new ThemedCardControl(knobsArea.GetHPadded(4.0f).GetVPadded(12.0f), namtheme::PANEL2, 12.0f, namtheme::LINE));
+    pGraphics->AttachControl(new ThemedTitleControl(titleArea));
     pGraphics->AttachControl(new ISVGControl(modelIconArea, modelIconSVG));
 
 #ifdef NAM_PICK_DIRECTORY
@@ -238,9 +244,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Getting started page listing additional resources
     const char* const getUrl = "https://www.neuralampmodeler.com/users#comp-marb84o5";
     pGraphics->AttachControl(
-      new NAMFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
-                                loadModelCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
+      new ThemedFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
+                                   loadModelCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                   fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl, namtheme::Accent()),
       kCtrlTagModelFileBrowser);
 
     auto hideSlimOverlay = [](IControl* pCaller) {
@@ -268,28 +274,24 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle));
     pGraphics->AttachControl(
-      new NAMFileBrowserControl(irArea, kMsgTagClearIR, defaultIRString.c_str(), "wav", loadIRCompletionHandler, style,
-                                fileSVG, crossSVG, leftArrowSVG, rightArrowSVG, fileBackgroundBitmap, globeSVG,
-                                "Get IRs", getUrl),
+      new ThemedFileBrowserControl(irArea, kMsgTagClearIR, defaultIRString.c_str(), "wav", loadIRCompletionHandler,
+                                   style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG, fileBackgroundBitmap,
+                                   globeSVG, "Get IRs", getUrl, IColor(255, 110, 168, 255)),
       kCtrlTagIRFileBrowser);
-    pGraphics->AttachControl(
-      new NAMSwitchControl(ngToggleArea, kNoiseGateActive, "Noise Gate", style, switchHandleBitmap));
-    pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap));
+    pGraphics->AttachControl(new ThemedSwitchControl(ngToggleArea, kNoiseGateActive, "NOISE GATE", style));
+    pGraphics->AttachControl(new ThemedSwitchControl(eqToggleArea, kEQActive, "EQ", style));
 
     // The knobs
-    pGraphics->AttachControl(new NAMKnobControl(inputKnobArea, kInputLevel, "", style, knobBackgroundBitmap));
-    pGraphics->AttachControl(new NAMKnobControl(noiseGateArea, kNoiseGateThreshold, "", style, knobBackgroundBitmap));
-    pGraphics->AttachControl(
-      new NAMKnobControl(bassKnobArea, kToneBass, "", style, knobBackgroundBitmap), -1, "EQ_KNOBS");
-    pGraphics->AttachControl(
-      new NAMKnobControl(midKnobArea, kToneMid, "", style, knobBackgroundBitmap), -1, "EQ_KNOBS");
-    pGraphics->AttachControl(
-      new NAMKnobControl(trebleKnobArea, kToneTreble, "", style, knobBackgroundBitmap), -1, "EQ_KNOBS");
-    pGraphics->AttachControl(new NAMKnobControl(outputKnobArea, kOutputLevel, "", style, knobBackgroundBitmap));
+    pGraphics->AttachControl(new ThemedKnobControl(inputKnobArea, kInputLevel, "INPUT", style));
+    pGraphics->AttachControl(new ThemedKnobControl(noiseGateArea, kNoiseGateThreshold, "GATE", style));
+    pGraphics->AttachControl(new ThemedKnobControl(bassKnobArea, kToneBass, "BASS", style), -1, "EQ_KNOBS");
+    pGraphics->AttachControl(new ThemedKnobControl(midKnobArea, kToneMid, "MIDDLE", style), -1, "EQ_KNOBS");
+    pGraphics->AttachControl(new ThemedKnobControl(trebleKnobArea, kToneTreble, "TREBLE", style), -1, "EQ_KNOBS");
+    pGraphics->AttachControl(new ThemedKnobControl(outputKnobArea, kOutputLevel, "OUTPUT", style));
 
     // The meters
-    pGraphics->AttachControl(new NAMMeterControl(inputMeterArea, meterBackgroundBitmap, style), kCtrlTagInputMeter);
-    pGraphics->AttachControl(new NAMMeterControl(outputMeterArea, meterBackgroundBitmap, style), kCtrlTagOutputMeter);
+    pGraphics->AttachControl(new ThemedMeterControl(inputMeterArea, style), kCtrlTagInputMeter);
+    pGraphics->AttachControl(new ThemedMeterControl(outputMeterArea, style), kCtrlTagOutputMeter);
 
     // Settings/help/about box
     pGraphics->AttachControl(new NAMCircleButtonControl(
