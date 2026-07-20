@@ -220,6 +220,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
           _StageChainModel(slot, fileName.Get());
           mChainSlots[slot].tonePath.Set(path.Get());
           mChainSlots[slot].enabled = true;
+          _UpdateBrowsersForEditSlot();
           return;
         }
         // Sets mNAMPath and mStagedNAM
@@ -252,6 +253,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
           _StageChainIR(slot, fileName.Get());
           mChainSlots[slot].tonePath.Set(path.Get());
           mChainSlots[slot].enabled = true;
+          _UpdateBrowsersForEditSlot();
           return;
         }
         mIRPath = fileName;
@@ -876,6 +878,11 @@ void NeuralAmpModeler::OnUIOpen()
   {
     _UpdateControlsFromModel();
   }
+
+  // Tone Gallery fork: if the window reopened while a chain unit was being
+  // edited, the browsers should show that unit's files, not the main tone's.
+  if (mChainEditSlot >= 1)
+    _UpdateBrowsersForEditSlot();
 }
 
 void NeuralAmpModeler::OnParamChange(int paramIdx)
@@ -947,8 +954,25 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
 {
   switch (msgTag)
   {
-    case kMsgTagClearModel: mShouldRemoveModel = true; return true;
-    case kMsgTagClearIR: mShouldRemoveIR = true; return true;
+    case kMsgTagClearModel:
+      // Tone Gallery fork: the browser's X clears the edited chain unit.
+      if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+      {
+        mChainSlots[mChainEditSlot - 1].modelPath.Set("");
+        mChainSlots[mChainEditSlot - 1].removeModel = true;
+      }
+      else
+        mShouldRemoveModel = true;
+      return true;
+    case kMsgTagClearIR:
+      if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+      {
+        mChainSlots[mChainEditSlot - 1].irPath.Set("");
+        mChainSlots[mChainEditSlot - 1].removeIR = true;
+      }
+      else
+        mShouldRemoveIR = true;
+      return true;
     case kMsgTagHighlightColor:
     {
       mHighLightColor.Set((const char*)pData);
@@ -1383,6 +1407,8 @@ void NeuralAmpModeler::BeginChainKnobEdit(int unit)
     slot.inputDB.load(), slot.bass.load(), slot.middle.load(), slot.treble.load(), slot.levelDB.load()};
   for (int i = 0; i < 5; i++)
     _SetKnobParamAndNotify(kKnobs[i], values[i]);
+  // The file browsers show this unit's files while it's being edited.
+  _UpdateBrowsersForEditSlot();
 }
 
 void NeuralAmpModeler::EndChainKnobEdit()
@@ -1394,6 +1420,8 @@ void NeuralAmpModeler::EndChainKnobEdit()
   static const int kKnobs[5] = {kInputLevel, kToneBass, kToneMid, kToneTreble, kOutputLevel};
   for (int i = 0; i < 5; i++)
     _SetKnobParamAndNotify(kKnobs[i], mMainKnobBackup[i]);
+  // Hand the file browsers back to the main tone.
+  _UpdateBrowsersForEditSlot();
 }
 
 void NeuralAmpModeler::_SetKnobParamAndNotify(int paramIdx, double value)
@@ -1403,6 +1431,27 @@ void NeuralAmpModeler::_SetKnobParamAndNotify(int paramIdx, double value)
   SendParameterValueFromDelegate(paramIdx, GetParam(paramIdx)->GetNormalized(), true);
   // ...and apply the change to the DSP.
   OnParamChange(paramIdx);
+}
+
+void NeuralAmpModeler::_UpdateBrowsersForEditSlot()
+{
+  auto send = [&](int ctrlTag, int loadedMsg, const WDL_String& path) {
+    if (path.GetLength())
+      SendControlMsgFromDelegate(ctrlTag, loadedMsg, path.GetLength(), path.Get());
+    else
+      SendControlMsgFromDelegate(ctrlTag, kMsgTagClearedDisplay);
+  };
+  if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+  {
+    const ChainSlot& slot = mChainSlots[mChainEditSlot - 1];
+    send(kCtrlTagModelFileBrowser, kMsgTagLoadedModel, slot.modelPath);
+    send(kCtrlTagIRFileBrowser, kMsgTagLoadedIR, slot.irPath);
+  }
+  else
+  {
+    send(kCtrlTagModelFileBrowser, kMsgTagLoadedModel, mNAMPath);
+    send(kCtrlTagIRFileBrowser, kMsgTagLoadedIR, mIRPath);
+  }
 }
 
 size_t NeuralAmpModeler::_GetBufferNumChannels() const
