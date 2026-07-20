@@ -349,9 +349,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     // Rack view overlay (topmost; shown by shrinking the window).
     pGraphics
-      ->AttachControl(
-        new NAMRackViewControl(b.GetFromTop(kRackViewHeight), loadModelCompletionHandler, loadIRCompletionHandler),
-        kCtrlTagRackView)
+      ->AttachControl(new NAMRackViewControl(b, loadModelCompletionHandler, loadIRCompletionHandler), kCtrlTagRackView)
       ->Hide(true);
 
     pGraphics->ForAllControlsFunc([](IControl* pControl) {
