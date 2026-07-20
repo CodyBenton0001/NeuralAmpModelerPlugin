@@ -356,6 +356,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       },
       gearSVG));
 
+    // TONE3000 opener button (attached BEFORE the detail panel so the panel
+    // slides over it instead of the button poking through).
+    pGraphics->AttachControl(new NAMT3KButtonControl(t3kButtonArea));
+
     // Tone sidebar (left) and favorites bar (bottom) - always visible.
     pGraphics->AttachControl(
       new NAMToneSidebarControl(sidebarArea, loadModelCompletionHandler, loadIRCompletionHandler), kCtrlTagToneSidebar);
@@ -371,10 +375,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                       kCtrlTagToneDetail)
       ->Hide(true);
 
-    // TONE3000 live search (see NAMTone3000Browser.h): a proper two-line
-    // button in the top-left of the main panel opens the in-plugin browser
-    // that searches tone3000.com and downloads tones into the library.
-    pGraphics->AttachControl(new NAMT3KButtonControl(t3kButtonArea));
+    // TONE3000 live search browser overlay (the opener button is attached
+    // earlier, underneath the tone detail panel).
     pGraphics
       ->AttachControl(
         new NAMTone3000BrowserControl(mainB, loadModelCompletionHandler, loadIRCompletionHandler), kCtrlTagTone3000)
