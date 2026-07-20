@@ -518,10 +518,28 @@ public:
 };
 
 inline void NotifyNowPlaying(IGraphics* ui, const ToneEntry& entry, const std::string& modelPath,
-                             const std::string& irPath)
+                             const std::string& irPath, bool force = false)
 {
   if (ui == nullptr)
     return;
+  // Tone Gallery fork: while a chain unit other than the main one is being
+  // edited, tone loads land in that CHAIN SLOT -- they are not the new main
+  // tone, so the main "now playing" displays (unit-1 screen, sidebar glow,
+  // favorites, detail LED, rack screen) must NOT update. `force` is used by
+  // the plugin's own restore code, which always describes the real main tone.
+  if (!force)
+  {
+    if (auto* pPlug = static_cast<PLUG_CLASS_NAME*>(ui->GetDelegate()))
+    {
+      if (pPlug->mChainEditSlot >= 1)
+      {
+        // Still repaint the chain view so the edited slot's screen refreshes.
+        if (IControl* pChain = ui->GetControlWithTag(kCtrlTagChainView))
+          pChain->SetDirty(false);
+        return;
+      }
+    }
+  }
   const int tags[] = {
     kCtrlTagToneSidebar, kCtrlTagFavoritesBar, kCtrlTagToneDetail, kCtrlTagRackView, kCtrlTagChainView};
   for (int tag : tags)
