@@ -1,8 +1,8 @@
 //
-//  Colors.h
-//  NeuralAmpModeler-macOS
+// Colors.h
+// NeuralAmpModeler-macOS
 //
-//  Created by Steven Atkinson on 12/27/22.
+// Created by Steven Atkinson on 12/27/22.
 //
 // Store the defined colors for the plugin in one place
 
