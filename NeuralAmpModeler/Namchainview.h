@@ -16,6 +16,326 @@ constexpr float kChainHeaderHeight = 34.0f;
 constexpr float kChainUnitHeight = 106.0f;
 constexpr float kChainViewHeight = kChainHeaderHeight + 4.0f * kChainUnitHeight + 6.0f; // 464
 
+// ---------------------------------------------------------------------------
+// Main-view Tone Morph controls (a MORPH knob in the top knob row + a pair of
+// A TONE / B TONE cards). They act on the "focused" unit: the slot currently
+// being edited, or the main tone otherwise. Clicking a card selects which side
+// (A or B) the tone library loads into; the knob blends between them.
+// ---------------------------------------------------------------------------
+
+// The MORPH knob for the top knob row (drawn to match ThemedKnobControl).
+class NAMMorphKnobControl : public IControl
+{
+public:
+  NAMMorphKnobControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    SetTooltip("MORPH: blend from the A tone to the B tone");
+  }
+
+  int FocusUnit() const { return PLUG()->mChainEditSlot >= 1 ? PLUG()->mChainEditSlot : 0; }
+
+  void Draw(IGraphics& g) override
+  {
+    const IColor accent = namtheme::Accent();
+    const int unit = FocusUnit();
+    const bool hasB = PLUG()->UnitHasB(unit);
+    const double morph = PLUG()->GetUnitMorph(unit);
+
+    const IRECT knobBox = mRECT.GetReducedFromBottom(20.0f);
+    const float d = std::min(knobBox.W(), knobBox.H());
+    const IRECT sq = knobBox.GetCentredInside(d);
+    const float cx = sq.MW(), cy = sq.MH();
+    const float radius = 0.5f * d * 0.80f;
+    const float a1 = -135.0f, a2 = 135.0f;
+    const float angle = a1 + (float)morph * (a2 - a1);
+    const IColor arcCol = hasB ? accent : namtheme::TEXT_FAINT;
+
+    g.DrawArc(namtheme::TRACK, cx, cy, radius, a1, a2, nullptr, 3.5f);
+    if (hasB && angle > a1 + 0.5f)
+      g.DrawArc(arcCol, cx, cy, radius, a1, angle, nullptr, 3.5f);
+
+    const float capR = radius - 7.0f;
+    const IRECT capRect(cx - capR, cy - capR, cx + capR, cy + capR);
+    g.FillEllipse(namtheme::KNOB_FACE, capRect);
+    g.DrawEllipse(namtheme::LINE, capRect);
+    if (mHover && hasB)
+      g.FillEllipse(PluginColors::MOUSEOVER, capRect);
+
+    if (hasB)
+    {
+      const float rad = (angle - 90.0f) * 3.14159265f / 180.0f;
+      const float px = cx + (capR * 0.62f) * std::cos(rad);
+      const float py = cy + (capR * 0.62f) * std::sin(rad);
+      g.PathCircle(px, py, 5.5f);
+      g.PathFill(
+        IPattern::CreateRadialGradient(px, py, 7.0f, {{accent.WithOpacity(0.5f), 0.0f}, {COLOR_TRANSPARENT, 1.0f}}));
+      g.FillCircle(accent, px, py, 2.5f);
+    }
+    else
+    {
+      const IText plus(15.0f, accent.WithOpacity(0.85f), namtheme::kFontBold, EAlign::Center, EVAlign::Middle);
+      g.DrawText(plus, "+", capRect);
+    }
+
+    const IText label(12.0f, hasB ? accent : namtheme::TEXT_DIM, namtheme::kFontBold, EAlign::Center, EVAlign::Middle);
+    g.DrawText(label, "MORPH", mRECT.GetFromBottom(18.0f).GetFromTop(11.0f));
+    char sub[24];
+    if (hasB)
+      snprintf(sub, sizeof(sub), "%.0f%%", morph * 100.0);
+    else
+      snprintf(sub, sizeof(sub), "ADD B");
+    const IText subText(8.0f, namtheme::TEXT_FAINT, namtheme::kFontBody, EAlign::Center, EVAlign::Middle);
+    g.DrawText(subText, sub, mRECT.GetFromBottom(9.0f));
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (!PLUG()->UnitHasB(FocusUnit()))
+    {
+      // No B yet: arm the B side so the next library pick loads into B.
+      PLUG()->SetChainEditTargetB(true);
+      GetUI()->SetAllControlsDirty();
+      return;
+    }
+    mDragging = true;
+  }
+
+  void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
+  {
+    if (!mDragging)
+      return;
+    const int unit = FocusUnit();
+    const double next = std::max(0.0, std::min(1.0, PLUG()->GetUnitMorph(unit) - (double)dY * 0.005));
+    PLUG()->SetUnitMorph(unit, next);
+    SetDirty(false);
+  }
+
+  void OnMouseUp(float x, float y, const IMouseMod& mod) override { mDragging = false; }
+
+  void OnMouseDblClick(float x, float y, const IMouseMod& mod) override
+  {
+    PLUG()->SetUnitMorph(FocusUnit(), 0.0);
+    SetDirty(false);
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    if (!mHover)
+    {
+      mHover = true;
+      SetDirty(false);
+    }
+  }
+  void OnMouseOut() override
+  {
+    if (mHover)
+    {
+      mHover = false;
+      SetDirty(false);
+    }
+  }
+
+private:
+  bool mDragging = false;
+  bool mHover = false;
+};
+
+// The A TONE / B TONE card pair for the main view.
+class NAMMorphCardsControl : public IControl, public tonegallery::INowPlayingListener
+{
+public:
+  NAMMorphCardsControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+  }
+
+  int FocusUnit() const { return PLUG()->mChainEditSlot >= 1 ? PLUG()->mChainEditSlot : 0; }
+
+  void SetNowPlaying(const tonegallery::ToneEntry& entry, const std::string& modelPath,
+                     const std::string& irPath) override
+  {
+    mMainEntry = entry;
+    mHasMainEntry = true;
+    SetDirty(false);
+  }
+
+  IRECT ACardRect() const { return mRECT.GetGridCell(0, 0, 1, 2).GetPadded(-3.0f); }
+  IRECT BCardRect() const { return mRECT.GetGridCell(0, 1, 1, 2).GetPadded(-3.0f); }
+
+  void Draw(IGraphics& g) override
+  {
+    const IColor accent = namtheme::Accent();
+    const bool bActive = PLUG()->mChainEditTargetB;
+    DrawCard(g, ACardRect(), false, !bActive, accent);
+    DrawCard(g, BCardRect(), true, bActive, accent);
+  }
+
+  void DrawCard(IGraphics& g, const IRECT& card, bool isB, bool active, const IColor& accent)
+  {
+    const int unit = FocusUnit();
+    const tonegallery::ToneEntry* pEntry = isB ? ResolveB(unit) : ResolveA(unit);
+    const bool hasTone = pEntry != nullptr;
+
+    g.FillRoundRect(namtheme::CARD, card, 8.0f);
+    if (active)
+      g.DrawRoundRect(accent, card, 8.0f, nullptr, 1.5f);
+    else
+      g.DrawRoundRect(namtheme::LINE, card, 8.0f);
+
+    const IRECT labelRow = card.GetFromTop(16.0f).GetReducedFromLeft(8.0f).GetReducedFromTop(3.0f);
+    const IText labelText(
+      8.0f, active ? accent : namtheme::TEXT_DIM, namtheme::kFontBold, EAlign::Near, EVAlign::Middle);
+    g.DrawText(labelText, isB ? "B TONE" : "A TONE", labelRow);
+
+    if (isB && hasTone)
+    {
+      const IRECT xr = card.GetFromTRHC(18.0f, 18.0f).GetCentredInside(8.0f);
+      const IColor xc = namtheme::TEXT_FAINT;
+      g.DrawLine(xc, xr.L, xr.T, xr.R, xr.B, nullptr, 1.5f);
+      g.DrawLine(xc, xr.L, xr.B, xr.R, xr.T, nullptr, 1.5f);
+    }
+
+    const IRECT bodyR = card.GetReducedFromTop(18.0f).GetPadded(-6.0f);
+    const IRECT photo = bodyR.GetFromLeft(bodyR.H());
+    if (hasTone)
+    {
+      IBitmap* pBitmap = GetImage(pEntry->imagePath);
+      const IRECT photoVis = photo.Intersect(mRECT);
+      if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0 && photoVis.W() > 0.5f && photoVis.H() > 0.5f)
+      {
+        const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
+        const float areaAspect = photo.W() / photo.H();
+        IRECT cover = photo;
+        if (bmpAspect > areaAspect)
+          cover = photo.GetMidHPadded(0.5f * photo.H() * bmpAspect);
+        else
+          cover = photo.GetMidVPadded(0.5f * photo.W() / bmpAspect);
+        g.PathClipRegion(photo);
+        g.DrawFittedBitmap(*pBitmap, cover);
+        g.PathClipRegion();
+      }
+      else
+      {
+        const IColor gc = tonegallery::GearTypeColor(pEntry->gearType);
+        g.FillRoundRect(gc.WithOpacity(0.15f), photo, 6.0f);
+        const IText it(14.0f, gc, namtheme::kFontBold, EAlign::Center, EVAlign::Middle);
+        std::string ini;
+        ini += pEntry->name.empty() ? '?' : (char)std::toupper((unsigned char)pEntry->name[0]);
+        g.DrawText(it, ini.c_str(), photo);
+      }
+      const IRECT txt = bodyR.GetReducedFromLeft(photo.W() + 7.0f);
+      const IText nameText(9.5f, namtheme::TEXT_MAIN, namtheme::kFontBold, EAlign::Near, EVAlign::Top);
+      float ty = txt.T;
+      for (const auto& line : tonegallery::WrapLines(pEntry->name, 16, 2))
+      {
+        g.DrawText(nameText, line.c_str(), IRECT(txt.L, ty, txt.R, ty + 12.0f));
+        ty += 12.0f;
+      }
+      const char* gearLabel = tonegallery::GearTypeChipLabel(pEntry->gearType);
+      std::string sub = gearLabel;
+      if (!pEntry->author.empty())
+        sub += std::string("  by ") + pEntry->author;
+      const IText subText(7.5f, namtheme::TEXT_DIM, namtheme::kFontBody, EAlign::Near, EVAlign::Middle);
+      g.DrawText(subText, tonegallery::Ellipsize(sub, 28).c_str(), IRECT(txt.L, txt.B - 12.0f, txt.R, txt.B));
+    }
+    else
+    {
+      const IColor promptCol = active ? accent : namtheme::TEXT_FAINT;
+      const IText t(9.5f, promptCol, namtheme::kFontBold, EAlign::Center, EVAlign::Middle);
+      if (active)
+        g.DrawText(t, "Pick a tone from the library", bodyR);
+      else
+        g.DrawText(t, isB ? "+ LOAD B" : "No tone", bodyR);
+    }
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (BCardRect().Contains(x, y))
+    {
+      const int unit = FocusUnit();
+      if (PLUG()->UnitHasB(unit) && BCardRect().GetFromTRHC(18.0f, 18.0f).Contains(x, y))
+      {
+        PLUG()->ClearUnitB(unit);
+        GetUI()->SetAllControlsDirty();
+        return;
+      }
+      PLUG()->SetChainEditTargetB(true);
+      GetUI()->SetAllControlsDirty();
+      return;
+    }
+    if (ACardRect().Contains(x, y))
+    {
+      PLUG()->SetChainEditTargetB(false);
+      GetUI()->SetAllControlsDirty();
+      return;
+    }
+  }
+
+  const tonegallery::ToneEntry* ResolveA(int unit)
+  {
+    if (unit == 0)
+      return mHasMainEntry ? &mMainEntry : nullptr;
+    return ResolvePath(0, PLUG()->mChainSlots[unit - 1].tonePath.Get());
+  }
+  const tonegallery::ToneEntry* ResolveB(int unit) { return ResolvePath(1, PLUG()->GetUnitBTonePath(unit)); }
+
+  const tonegallery::ToneEntry* ResolvePath(int slot, const char* path)
+  {
+    const std::string key = (path != nullptr) ? path : "";
+    if (key != mCacheKey[slot])
+    {
+      mCacheKey[slot] = key;
+      mCacheValid[slot] = false;
+      if (!key.empty())
+      {
+        try
+        {
+          tonegallery::ToneEntry e;
+          if (tonegallery::ScanToneFolder(tonegallery::UTF8ToPath(key), e))
+          {
+            mCache[slot] = e;
+            mCacheValid[slot] = true;
+          }
+        }
+        catch (const std::exception&)
+        {
+        }
+      }
+    }
+    return mCacheValid[slot] ? &mCache[slot] : nullptr;
+  }
+
+  IBitmap* GetImage(const std::string& path)
+  {
+    if (path.empty())
+      return nullptr;
+    auto f = mImageCache.find(path);
+    if (f != mImageCache.end())
+      return f->second.GetAPIBitmap() ? &f->second : nullptr;
+    IBitmap bmp;
+    try
+    {
+      if (std::filesystem::exists(tonegallery::UTF8ToPath(path)))
+        bmp = GetUI()->LoadBitmap(path.c_str());
+    }
+    catch (const std::exception&)
+    {
+    }
+    auto ins = mImageCache.insert({path, bmp});
+    return ins.first->second.GetAPIBitmap() ? &ins.first->second : nullptr;
+  }
+
+private:
+  tonegallery::ToneEntry mMainEntry;
+  bool mHasMainEntry = false;
+  tonegallery::ToneEntry mCache[2];
+  std::string mCacheKey[2];
+  bool mCacheValid[2] = {false, false};
+  std::map<std::string, IBitmap> mImageCache;
+};
+
 class NAMChainViewControl : public IControl, public tonegallery::INowPlayingListener
 {
 public:
@@ -904,7 +1224,25 @@ private:
     const IRECT text = TextRect(i);
     const IText nameText(
       12.0f, enabled ? namtheme::TEXT_MAIN : namtheme::TEXT_DIM, "Inter-Bold", EAlign::Near, EVAlign::Top);
-    const std::string displayName = pEntry != nullptr ? pEntry->name : (!fallbackName.empty() ? fallbackName : "Empty");
+    std::string displayName = pEntry != nullptr ? pEntry->name : (!fallbackName.empty() ? fallbackName : "Empty");
+    // Tone Morph: show the B tone in the name as "A -> B".
+    if (PLUG()->UnitHasB(i))
+    {
+      const char* btp = PLUG()->GetUnitBTonePath(i);
+      std::string bName;
+      if (btp != nullptr && btp[0] != '\0')
+      {
+        try
+        {
+          bName = tonegallery::PathToUTF8(tonegallery::UTF8ToPath(btp).filename());
+        }
+        catch (const std::exception&)
+        {
+        }
+      }
+      if (!bName.empty())
+        displayName += " \xe2\x86\x92 " + bName;
+    }
     float ty = text.T;
     for (const auto& line : tonegallery::WrapLines(displayName, 30, 2))
     {
