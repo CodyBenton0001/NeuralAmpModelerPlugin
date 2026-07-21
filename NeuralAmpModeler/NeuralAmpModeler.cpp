@@ -212,6 +212,37 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto loadModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
       if (fileName.GetLength())
       {
+        // Tone Morph: while targeting a unit's B side, the load goes there.
+        if (mChainEditTargetB && mChainEditSlot >= 0 && mChainEditSlot <= kNumChainSlots)
+        {
+          const int unit = mChainEditSlot;
+          if (strcmp(GetUnitBTonePath(unit), path.Get()) != 0)
+          {
+            // New tone folder for B: clear the B IR so tones swap cleanly.
+            if (unit == 0)
+            {
+              mIRPathB.Set("");
+              mShouldRemoveIRB = true;
+            }
+            else
+            {
+              mChainSlots[unit - 1].irBPath.Set("");
+              mChainSlots[unit - 1].removeIRB = true;
+            }
+          }
+          if (unit == 0)
+            _StageModelB(fileName);
+          else
+            _StageChainModelB(unit - 1, fileName.Get());
+          if (unit == 0)
+            mMainToneBPath.Set(path.Get());
+          else
+            mChainSlots[unit - 1].toneBPath.Set(path.Get());
+          if (GetUnitMorph(unit) < 0.0001)
+            SetUnitMorph(unit, 0.5); // make the newly loaded B tone audible
+          _UpdateBrowsersForEditSlot();
+          return;
+        }
         // Tone Gallery fork: while editing a chain unit, loads go to that
         // slot instead of the main model. Loading a different tone folder
         // also clears the slot's old IR so tones swap cleanly.
@@ -246,6 +277,37 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto loadIRCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
       if (fileName.GetLength())
       {
+        // Tone Morph: while targeting a unit's B side, the IR goes there.
+        if (mChainEditTargetB && mChainEditSlot >= 0 && mChainEditSlot <= kNumChainSlots)
+        {
+          const int unit = mChainEditSlot;
+          if (strcmp(GetUnitBTonePath(unit), path.Get()) != 0)
+          {
+            // New tone folder: an IR-only (cab) B clears the B amp model.
+            if (unit == 0)
+            {
+              mNAMPathB.Set("");
+              mShouldRemoveModelB = true;
+            }
+            else
+            {
+              mChainSlots[unit - 1].modelBPath.Set("");
+              mChainSlots[unit - 1].removeModelB = true;
+            }
+          }
+          if (unit == 0)
+            _StageIRB(fileName);
+          else
+            _StageChainIRB(unit - 1, fileName.Get());
+          if (unit == 0)
+            mMainToneBPath.Set(path.Get());
+          else
+            mChainSlots[unit - 1].toneBPath.Set(path.Get());
+          if (GetUnitMorph(unit) < 0.0001)
+            SetUnitMorph(unit, 0.5); // make the newly loaded B tone audible
+          _UpdateBrowsersForEditSlot();
+          return;
+        }
         // Tone Gallery fork: route into the chain slot being edited. An
         // IR-only tone (a cab) clears the slot's old amp model.
         if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
@@ -535,7 +597,37 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   // Tone Gallery fork: unit 1 of the signal chain can be bypassed.
   const bool mainUnitEnabled = mChainMainEnabled.load();
-  if (mModel != nullptr && mainUnitEnabled)
+  const bool irOn = GetParam(kIRToggle)->Value();
+  // Tone Morph (main unit): when the morph knob is up and a B tone is loaded,
+  // run a second complete tone (mModelB -> mIRB) in parallel and equal-power
+  // crossfade between them. morph 0 or no B => the original path runs untouched.
+  const double mainMorph = mChainMainMorph.load();
+  const bool mainMorphing = mainUnitEnabled && mModel != nullptr && mModelB != nullptr && mainMorph > 0.0001;
+  if (mainMorphing)
+  {
+    if (mMorphArrayA.size() < numFrames)
+      mMorphArrayA.resize(numFrames, 0.0);
+    if (mMorphArrayB.size() < numFrames)
+      mMorphArrayB.resize(numFrames, 0.0);
+    // A branch: main model -> main IR
+    sample* aScratch = mMorphArrayA.data();
+    mModel->process(triggerOutput, &aScratch, nFrames);
+    sample** aPtr = &aScratch;
+    if (mIR != nullptr && irOn)
+      aPtr = mIR->Process(aPtr, numChannelsInternal, numFrames);
+    // B branch: B model -> B IR
+    sample* bScratch = mMorphArrayB.data();
+    mModelB->process(triggerOutput, &bScratch, nFrames);
+    sample** bPtr = &bScratch;
+    if (mIRB != nullptr && irOn)
+      bPtr = mIRB->Process(bPtr, numChannelsInternal, numFrames);
+    // Equal-power crossfade into the main output buffer.
+    const double gA = std::cos(mainMorph * 1.5707963267948966);
+    const double gB = std::sin(mainMorph * 1.5707963267948966);
+    for (size_t s = 0; s < numFrames; s++)
+      mOutputPointers[0][s] = aPtr[0][s] * gA + bPtr[0][s] * gB;
+  }
+  else if (mModel != nullptr && mainUnitEnabled)
   {
     mModel->process(triggerOutput, mOutputPointers, nFrames);
   }
@@ -551,8 +643,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
                                     ? mToneStack->Process(gateGainOutput, numChannelsInternal, nFrames)
                                     : gateGainOutput;
 
+  // In morph mode the per-tone IRs already ran above, so don't run the main IR again.
   sample** irPointers = toneStackOutPointers;
-  if (mIR != nullptr && GetParam(kIRToggle)->Value() && mainUnitEnabled)
+  if (!mainMorphing && mIR != nullptr && irOn && mainUnitEnabled)
     irPointers = mIR->Process(toneStackOutPointers, numChannelsInternal, numFrames);
 
   // --- Tone Gallery fork: signal chain -------------------------------------
@@ -569,15 +662,57 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     ChainSlot& slot = mChainSlots[ci];
     if (!slot.enabled.load())
       continue;
-    const bool haveSlotDSP = (slot.model != nullptr) || (slot.ir != nullptr);
+    const bool haveSlotDSP =
+      (slot.model != nullptr) || (slot.ir != nullptr) || (slot.modelB != nullptr) || (slot.irB != nullptr);
     if (!haveSlotDSP)
       continue;
-    // Per-unit input gain (drives the unit harder or softer)
+    // Per-unit input gain (drives the unit harder or softer). Shared by both
+    // morph branches so A and B are hit at the same level.
     const double slotInGain = DBToAmp(slot.inputDB.load());
     if (slotInGain != 1.0)
       for (size_t s = 0; s < numFrames; s++)
         chainPointers[0][s] *= slotInGain;
-    if (slot.model != nullptr)
+
+    // Tone Morph (this unit): blend a second complete tone (modelB -> irB) in
+    // parallel. morph 0 or no B => the original single-tone path runs.
+    const double slotMorph = slot.morph.load();
+    const bool slotHasB = (slot.modelB != nullptr) || (slot.irB != nullptr);
+    const bool slotMorphing = slotHasB && slotMorph > 0.0001;
+    if (slotMorphing)
+    {
+      if (mChainArrays[ci].size() != numFrames)
+        mChainArrays[ci].resize(numFrames, 0.0);
+      if (mChainArraysB[ci].size() != numFrames)
+        mChainArraysB[ci].resize(numFrames, 0.0);
+      // A branch: model -> IR
+      sample** aPtr = chainPointers;
+      if (slot.model != nullptr)
+      {
+        mChainScratchPointers[ci] = mChainArrays[ci].data();
+        slot.model->process(chainPointers, &mChainScratchPointers[ci], nFrames);
+        aPtr = &mChainScratchPointers[ci];
+      }
+      if (slot.ir != nullptr)
+        aPtr = slot.ir->Process(aPtr, numChannelsInternal, numFrames);
+      // B branch: modelB -> irB (fed the same per-unit input)
+      sample** bPtr = chainPointers;
+      if (slot.modelB != nullptr)
+      {
+        mChainScratchPointersB[ci] = mChainArraysB[ci].data();
+        slot.modelB->process(chainPointers, &mChainScratchPointersB[ci], nFrames);
+        bPtr = &mChainScratchPointersB[ci];
+      }
+      if (slot.irB != nullptr)
+        bPtr = slot.irB->Process(bPtr, numChannelsInternal, numFrames);
+      // Equal-power crossfade back into this unit's A scratch buffer.
+      const double gA = std::cos(slotMorph * 1.5707963267948966);
+      const double gB = std::sin(slotMorph * 1.5707963267948966);
+      for (size_t s = 0; s < numFrames; s++)
+        mChainArrays[ci][s] = aPtr[0][s] * gA + bPtr[0][s] * gB;
+      mChainScratchPointers[ci] = mChainArrays[ci].data();
+      chainPointers = &mChainScratchPointers[ci];
+    }
+    else if (slot.model != nullptr)
     {
       if (mChainArrays[ci].size() != numFrames)
         mChainArrays[ci].resize(numFrames, 0.0);
@@ -590,7 +725,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     if (mChainToneStacks[ci] != nullptr
         && (std::abs(sb - 5.0) > 0.01 || std::abs(sm - 5.0) > 0.01 || std::abs(st - 5.0) > 0.01))
       chainPointers = mChainToneStacks[ci]->Process(chainPointers, numChannelsInternal, nFrames);
-    if (slot.ir != nullptr)
+    // In morph mode the per-tone IRs already ran above.
+    if (!slotMorphing && slot.ir != nullptr)
       chainPointers = slot.ir->Process(chainPointers, numChannelsInternal, numFrames);
     const double slotGain = DBToAmp(slot.levelDB.load());
     if (slotGain != 1.0)
@@ -699,7 +835,7 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
   // Tone Gallery fork: append the signal-chain block. Old versions of the
   // plugin simply never read this far, so this stays backwards-compatible.
-  chunk.PutStr("###NAMChainV3###");
+  chunk.PutStr("###NAMChainV4###");
   int mainEnabled = mChainMainEnabled.load() ? 1 : 0;
   double mainLevel = mChainMainLevelDB.load();
   int chainMode = mToneChainMode ? 1 : 0;
@@ -725,9 +861,21 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
     chunk.Put(&bass);
     chunk.Put(&middle);
     chunk.Put(&treble);
+    // V4: this slot's Tone Morph B tone + morph amount
+    chunk.PutStr(slot.modelBPath.Get());
+    chunk.PutStr(slot.irBPath.Get());
+    chunk.PutStr(slot.toneBPath.Get());
+    double morph = slot.morph.load();
+    chunk.Put(&morph);
   }
   // V3: which rig preset is loaded (so SAVE knows what to overwrite)
   chunk.PutStr(mRigPresetRel.Get());
+  // V4: the main unit's Tone Morph B tone + morph amount
+  chunk.PutStr(mNAMPathB.Get());
+  chunk.PutStr(mIRPathB.Get());
+  chunk.PutStr(mMainToneBPath.Get());
+  double mainMorph = mChainMainMorph.load();
+  chunk.Put(&mainMorph);
   return ok;
 }
 
@@ -738,6 +886,13 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
   mChainMainLevelDB = 0.0;
   mToneChainMode = false;
   mRigPresetRel.Set("");
+  // Tone Morph defaults (main unit)
+  mChainMainMorph = 0.0;
+  mNAMPathB.Set("");
+  mIRPathB.Set("");
+  mMainToneBPath.Set("");
+  mShouldRemoveModelB = true;
+  mShouldRemoveIRB = true;
   for (int ci = 0; ci < kNumChainSlots; ci++)
   {
     ChainSlot& slot = mChainSlots[ci];
@@ -752,6 +907,13 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     slot.irPath.Set("");
     slot.removeModel = true;
     slot.removeIR = true;
+    // Tone Morph defaults (slot)
+    slot.morph = 0.0;
+    slot.modelBPath.Set("");
+    slot.irBPath.Set("");
+    slot.toneBPath.Set("");
+    slot.removeModelB = true;
+    slot.removeIRB = true;
   }
 
   WDL_String marker;
@@ -759,7 +921,8 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
   const bool isV1 = pos > startPos && strcmp(marker.Get(), "###NAMChainV1###") == 0;
   const bool isV2 = pos > startPos && strcmp(marker.Get(), "###NAMChainV2###") == 0;
   const bool isV3 = pos > startPos && strcmp(marker.Get(), "###NAMChainV3###") == 0;
-  if (!isV1 && !isV2 && !isV3)
+  const bool isV4 = pos > startPos && strcmp(marker.Get(), "###NAMChainV4###") == 0;
+  if (!isV1 && !isV2 && !isV3 && !isV4)
     return startPos; // no chain block in this save
 
   int mainEnabled = 1, chainMode = 0;
@@ -799,7 +962,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     if (pos < 0)
       return startPos;
     double inputDB = 0.0, bass = 5.0, middle = 5.0, treble = 5.0;
-    if (isV2 || isV3)
+    if (isV2 || isV3 || isV4)
     {
       pos = chunk.Get(&inputDB, pos);
       if (pos < 0)
@@ -814,12 +977,31 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
       if (pos < 0)
         return startPos;
     }
+    // V4: this slot's Tone Morph B tone + morph amount
+    WDL_String modelBPath, irBPath, toneBPath;
+    double morph = 0.0;
+    if (isV4)
+    {
+      pos = chunk.GetStr(modelBPath, pos);
+      if (pos < 0)
+        return startPos;
+      pos = chunk.GetStr(irBPath, pos);
+      if (pos < 0)
+        return startPos;
+      pos = chunk.GetStr(toneBPath, pos);
+      if (pos < 0)
+        return startPos;
+      pos = chunk.Get(&morph, pos);
+      if (pos < 0)
+        return startPos;
+    }
     slot.enabled = enabled != 0;
     slot.levelDB = level;
     slot.inputDB = inputDB;
     slot.bass = bass;
     slot.middle = middle;
     slot.treble = treble;
+    slot.morph = morph;
     if (mChainToneStacks[ci] != nullptr)
     {
       mChainToneStacks[ci]->SetParam("bass", bass);
@@ -827,9 +1009,11 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
       mChainToneStacks[ci]->SetParam("treble", treble);
     }
     SetChainTone(ci, modelPath.Get(), irPath.Get(), tonePath.Get());
+    if (isV4)
+      StageUnitBTone(ci + 1, modelBPath.Get(), irBPath.Get(), toneBPath.Get());
   }
   // V3: the loaded rig preset path
-  if (isV3)
+  if (isV3 || isV4)
   {
     WDL_String rigRel;
     const int p2 = chunk.GetStr(rigRel, pos);
@@ -837,6 +1021,34 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     {
       mRigPresetRel = rigRel;
       pos = p2;
+    }
+  }
+  // V4: the main unit's Tone Morph B tone + morph amount
+  if (isV4)
+  {
+    WDL_String namB, irB, toneB;
+    double mainMorph = 0.0;
+    int p3 = chunk.GetStr(namB, pos);
+    if (p3 > 0)
+    {
+      pos = p3;
+      p3 = chunk.GetStr(irB, pos);
+    }
+    if (p3 > 0)
+    {
+      pos = p3;
+      p3 = chunk.GetStr(toneB, pos);
+    }
+    if (p3 > 0)
+    {
+      pos = p3;
+      p3 = chunk.Get(&mainMorph, pos);
+    }
+    if (p3 > 0)
+    {
+      pos = p3;
+      mChainMainMorph = mainMorph;
+      StageUnitBTone(0, namB.Get(), irB.Get(), toneB.Get());
     }
   }
   return pos;
@@ -967,7 +1179,20 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
   {
     case kMsgTagClearModel:
       // Tone Gallery fork: the browser's X clears the edited chain unit.
-      if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+      if (mChainEditTargetB)
+      {
+        if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+        {
+          mChainSlots[mChainEditSlot - 1].modelBPath.Set("");
+          mChainSlots[mChainEditSlot - 1].removeModelB = true;
+        }
+        else
+        {
+          mNAMPathB.Set("");
+          mShouldRemoveModelB = true;
+        }
+      }
+      else if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
       {
         mChainSlots[mChainEditSlot - 1].modelPath.Set("");
         mChainSlots[mChainEditSlot - 1].removeModel = true;
@@ -976,7 +1201,20 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
         mShouldRemoveModel = true;
       return true;
     case kMsgTagClearIR:
-      if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+      if (mChainEditTargetB)
+      {
+        if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+        {
+          mChainSlots[mChainEditSlot - 1].irBPath.Set("");
+          mChainSlots[mChainEditSlot - 1].removeIRB = true;
+        }
+        else
+        {
+          mIRPathB.Set("");
+          mShouldRemoveIRB = true;
+        }
+      }
+      else if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
       {
         mChainSlots[mChainEditSlot - 1].irPath.Set("");
         mChainSlots[mChainEditSlot - 1].removeIR = true;
@@ -1060,6 +1298,29 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mIR = std::move(mStagedIR);
     mStagedIR = nullptr;
   }
+  // Tone Morph: the main unit's B model/IR stage the same way.
+  if (mShouldRemoveModelB)
+  {
+    mModelB = nullptr;
+    mNAMPathB.Set("");
+    mShouldRemoveModelB = false;
+  }
+  if (mShouldRemoveIRB)
+  {
+    mIRB = nullptr;
+    mIRPathB.Set("");
+    mShouldRemoveIRB = false;
+  }
+  if (mStagedModelB != nullptr)
+  {
+    mModelB = std::move(mStagedModelB);
+    mStagedModelB = nullptr;
+  }
+  if (mStagedIRB != nullptr)
+  {
+    mIRB = std::move(mStagedIRB);
+    mStagedIRB = nullptr;
+  }
   // Tone Gallery fork: the extra chain slots stage the same way.
   for (int ci = 0; ci < kNumChainSlots; ci++)
   {
@@ -1083,6 +1344,27 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     {
       slot.ir = std::move(slot.stagedIR);
       slot.stagedIR = nullptr;
+    }
+    // Tone Morph: the slot's B model/IR.
+    if (slot.removeModelB)
+    {
+      slot.modelB = nullptr;
+      slot.removeModelB = false;
+    }
+    if (slot.removeIRB)
+    {
+      slot.irB = nullptr;
+      slot.removeIRB = false;
+    }
+    if (slot.stagedModelB != nullptr)
+    {
+      slot.modelB = std::move(slot.stagedModelB);
+      slot.stagedModelB = nullptr;
+    }
+    if (slot.stagedIRB != nullptr)
+    {
+      slot.irB = std::move(slot.stagedIRB);
+      slot.stagedIRB = nullptr;
     }
   }
 }
@@ -1145,6 +1427,28 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
     }
   }
 
+  // Tone Morph: reset the main unit's B model + IR.
+  if (mStagedModelB != nullptr)
+    mStagedModelB->Reset(sampleRate, maxBlockSize);
+  else if (mModelB != nullptr)
+    mModelB->Reset(sampleRate, maxBlockSize);
+  if (mStagedIRB != nullptr)
+  {
+    if (mStagedIRB->GetSampleRate() != sampleRate)
+    {
+      const auto irData = mStagedIRB->GetData();
+      mStagedIRB = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  else if (mIRB != nullptr)
+  {
+    if (mIRB->GetSampleRate() != sampleRate)
+    {
+      const auto irData = mIRB->GetData();
+      mStagedIRB = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+
   // Tone Gallery fork: same treatment for the extra chain slots.
   for (int ci = 0; ci < kNumChainSlots; ci++)
   {
@@ -1168,6 +1472,27 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
       {
         const auto irData = slot.ir->GetData();
         slot.stagedIR = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      }
+    }
+    // Tone Morph: reset the slot's B model + IR.
+    if (slot.stagedModelB != nullptr)
+      slot.stagedModelB->Reset(sampleRate, maxBlockSize);
+    else if (slot.modelB != nullptr)
+      slot.modelB->Reset(sampleRate, maxBlockSize);
+    if (slot.stagedIRB != nullptr)
+    {
+      if (slot.stagedIRB->GetSampleRate() != sampleRate)
+      {
+        const auto irData = slot.stagedIRB->GetData();
+        slot.stagedIRB = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      }
+    }
+    else if (slot.irB != nullptr)
+    {
+      if (slot.irB->GetSampleRate() != sampleRate)
+      {
+        const auto irData = slot.irB->GetData();
+        slot.stagedIRB = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
       }
     }
   }
@@ -1226,11 +1551,16 @@ void NeuralAmpModeler::_ApplySlimParamToLoadedNAMs()
   };
   apply(mModel.get());
   apply(mStagedModel.get());
+  // Tone Morph: the main unit's B model too
+  apply(mModelB.get());
+  apply(mStagedModelB.get());
   // Tone Gallery fork: chain models too
   for (int ci = 0; ci < kNumChainSlots; ci++)
   {
     apply(mChainSlots[ci].model.get());
     apply(mChainSlots[ci].stagedModel.get());
+    apply(mChainSlots[ci].modelB.get());
+    apply(mChainSlots[ci].stagedModelB.get());
   }
 }
 
@@ -1396,6 +1726,221 @@ void NeuralAmpModeler::SetChainTone(int slot, const char* modelPath, const char*
   mChainSlots[slot].tonePath.Set(tonePath != nullptr ? tonePath : "");
 }
 
+// --- Tone Morph: B-side staging + per-unit API ------------------------------
+
+std::string NeuralAmpModeler::_StageModelB(const WDL_String& modelPath)
+{
+  if (modelPath.GetLength() == 0)
+  {
+    mNAMPathB.Set("");
+    mShouldRemoveModelB = true;
+    return "";
+  }
+  WDL_String previousPath = mNAMPathB;
+  try
+  {
+    auto dspPath = std::filesystem::u8path(modelPath.Get());
+    std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
+    if (model->NumInputChannels() != 1 || model->NumOutputChannels() != 1)
+      throw std::runtime_error("Morph models must be mono");
+    std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
+    temp->Reset(GetSampleRate(), GetBlockSize());
+    if (nam::SlimmableModel* slimmable = temp->GetSlimmableModel())
+      slimmable->SetSlimmableSize(GetParam(kSlim)->Value());
+    mStagedModelB = std::move(temp);
+    mNAMPathB = modelPath;
+  }
+  catch (const std::exception& e)
+  {
+    mStagedModelB = nullptr;
+    mNAMPathB = previousPath;
+    std::cerr << "Failed to load morph model: " << e.what() << std::endl;
+    return e.what();
+  }
+  return "";
+}
+
+dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRB(const WDL_String& irPath)
+{
+  if (irPath.GetLength() == 0)
+  {
+    mIRPathB.Set("");
+    mShouldRemoveIRB = true;
+    return dsp::wav::LoadReturnCode::SUCCESS;
+  }
+  WDL_String previousPath = mIRPathB;
+  const double sampleRate = GetSampleRate();
+  dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
+  try
+  {
+    auto irPathU8 = std::filesystem::u8path(irPath.Get());
+    mStagedIRB = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+    wavState = mStagedIRB->GetWavState();
+  }
+  catch (std::runtime_error& e)
+  {
+    wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
+    std::cerr << "Failed to load morph IR: " << e.what() << std::endl;
+  }
+  if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+  {
+    mIRPathB = irPath;
+  }
+  else
+  {
+    mStagedIRB = nullptr;
+    mIRPathB = previousPath;
+  }
+  return wavState;
+}
+
+void NeuralAmpModeler::_StageChainModelB(int slot, const char* modelPath)
+{
+  if (slot < 0 || slot >= kNumChainSlots)
+    return;
+  ChainSlot& cs = mChainSlots[slot];
+  if (modelPath == nullptr || modelPath[0] == '\0')
+  {
+    cs.modelBPath.Set("");
+    cs.removeModelB = true;
+    return;
+  }
+  try
+  {
+    auto dspPath = std::filesystem::u8path(modelPath);
+    std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
+    if (model->NumInputChannels() != 1 || model->NumOutputChannels() != 1)
+      throw std::runtime_error("Morph models must be mono");
+    std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
+    temp->Reset(GetSampleRate(), GetBlockSize());
+    if (nam::SlimmableModel* slimmable = temp->GetSlimmableModel())
+      slimmable->SetSlimmableSize(GetParam(kSlim)->Value());
+    cs.stagedModelB = std::move(temp);
+    cs.modelBPath.Set(modelPath);
+  }
+  catch (const std::exception& e)
+  {
+    cs.stagedModelB = nullptr;
+    cs.modelBPath.Set("");
+    cs.removeModelB = true;
+    std::cerr << "Failed to load morph chain model: " << e.what() << std::endl;
+  }
+}
+
+void NeuralAmpModeler::_StageChainIRB(int slot, const char* irPath)
+{
+  if (slot < 0 || slot >= kNumChainSlots)
+    return;
+  ChainSlot& cs = mChainSlots[slot];
+  if (irPath == nullptr || irPath[0] == '\0')
+  {
+    cs.irBPath.Set("");
+    cs.removeIRB = true;
+    return;
+  }
+  try
+  {
+    auto irPathU8 = std::filesystem::u8path(irPath);
+    auto staged = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), GetSampleRate());
+    if (staged->GetWavState() == dsp::wav::LoadReturnCode::SUCCESS)
+    {
+      cs.stagedIRB = std::move(staged);
+      cs.irBPath.Set(irPath);
+    }
+    else
+    {
+      cs.irBPath.Set("");
+      cs.removeIRB = true;
+    }
+  }
+  catch (const std::exception& e)
+  {
+    cs.stagedIRB = nullptr;
+    cs.irBPath.Set("");
+    cs.removeIRB = true;
+    std::cerr << "Failed to load morph chain IR: " << e.what() << std::endl;
+  }
+}
+
+void NeuralAmpModeler::StageUnitBTone(int unit, const char* modelPath, const char* irPath, const char* tonePath)
+{
+  if (unit < 0 || unit > kNumChainSlots)
+    return;
+  if (unit == 0)
+  {
+    _StageModelB(WDL_String(modelPath != nullptr ? modelPath : ""));
+    _StageIRB(WDL_String(irPath != nullptr ? irPath : ""));
+    mMainToneBPath.Set(tonePath != nullptr ? tonePath : "");
+  }
+  else
+  {
+    _StageChainModelB(unit - 1, modelPath);
+    _StageChainIRB(unit - 1, irPath);
+    mChainSlots[unit - 1].toneBPath.Set(tonePath != nullptr ? tonePath : "");
+  }
+}
+
+void NeuralAmpModeler::ClearUnitB(int unit)
+{
+  if (unit < 0 || unit > kNumChainSlots)
+    return;
+  if (unit == 0)
+  {
+    mNAMPathB.Set("");
+    mIRPathB.Set("");
+    mMainToneBPath.Set("");
+    mShouldRemoveModelB = true;
+    mShouldRemoveIRB = true;
+    mChainMainMorph = 0.0;
+  }
+  else
+  {
+    ChainSlot& cs = mChainSlots[unit - 1];
+    cs.modelBPath.Set("");
+    cs.irBPath.Set("");
+    cs.toneBPath.Set("");
+    cs.removeModelB = true;
+    cs.removeIRB = true;
+    cs.morph = 0.0;
+  }
+}
+
+void NeuralAmpModeler::SetUnitMorph(int unit, double amt01)
+{
+  const double v = std::max(0.0, std::min(1.0, amt01));
+  if (unit == 0)
+    mChainMainMorph = v;
+  else if (unit >= 1 && unit <= kNumChainSlots)
+    mChainSlots[unit - 1].morph = v;
+}
+
+double NeuralAmpModeler::GetUnitMorph(int unit) const
+{
+  if (unit == 0)
+    return mChainMainMorph.load();
+  if (unit >= 1 && unit <= kNumChainSlots)
+    return mChainSlots[unit - 1].morph.load();
+  return 0.0;
+}
+
+bool NeuralAmpModeler::UnitHasB(int unit) const
+{
+  if (unit == 0)
+    return mNAMPathB.GetLength() > 0 || mIRPathB.GetLength() > 0;
+  if (unit >= 1 && unit <= kNumChainSlots)
+    return mChainSlots[unit - 1].modelBPath.GetLength() > 0 || mChainSlots[unit - 1].irBPath.GetLength() > 0;
+  return false;
+}
+
+const char* NeuralAmpModeler::GetUnitBTonePath(int unit) const
+{
+  if (unit == 0)
+    return mMainToneBPath.Get();
+  if (unit >= 1 && unit <= kNumChainSlots)
+    return mChainSlots[unit - 1].toneBPath.Get();
+  return "";
+}
+
 // --- Rig presets ------------------------------------------------------------
 
 nlohmann::json NeuralAmpModeler::CaptureRigPreset() const
@@ -1446,6 +1991,14 @@ nlohmann::json NeuralAmpModeler::CaptureRigPreset() const
     m["ir_rel"] = relOf(mIRPath.Get());
     m["enabled"] = mChainMainEnabled.load();
     m["level"] = mChainMainLevelDB.load();
+    // Tone Morph: the main unit's B tone + morph amount
+    m["model_b"] = std::string(mNAMPathB.Get());
+    m["model_b_rel"] = relOf(mNAMPathB.Get());
+    m["ir_b"] = std::string(mIRPathB.Get());
+    m["ir_b_rel"] = relOf(mIRPathB.Get());
+    m["tone_b"] = std::string(mMainToneBPath.Get());
+    m["tone_b_rel"] = relOf(mMainToneBPath.Get());
+    m["morph"] = mChainMainMorph.load();
     j["main"] = m;
     // Display name: the tone folder if it's in the library, else the file.
     std::string disp = "Empty";
@@ -1498,6 +2051,14 @@ nlohmann::json NeuralAmpModeler::CaptureRigPreset() const
       s["bass"] = slot.bass.load();
       s["middle"] = slot.middle.load();
       s["treble"] = slot.treble.load();
+      // Tone Morph: this slot's B tone + morph amount
+      s["model_b"] = std::string(slot.modelBPath.Get());
+      s["model_b_rel"] = relOf(slot.modelBPath.Get());
+      s["ir_b"] = std::string(slot.irBPath.Get());
+      s["ir_b_rel"] = relOf(slot.irBPath.Get());
+      s["tone_b"] = std::string(slot.toneBPath.Get());
+      s["tone_b_rel"] = relOf(slot.toneBPath.Get());
+      s["morph"] = slot.morph.load();
       slots.push_back(s);
       peek.push_back(peekName(slot.tonePath.Get(), slot.modelPath.Get(), slot.irPath.Get()));
     }
@@ -1555,6 +2116,12 @@ void NeuralAmpModeler::ApplyRigPreset(const nlohmann::json& j)
       }
       mChainMainEnabled = m.value("enabled", true);
       mChainMainLevelDB = m.value("level", 0.0);
+      // Tone Morph: the main unit's B tone + morph
+      const std::string modelB = resolve(m, "model_b", "model_b_rel");
+      const std::string irB = resolve(m, "ir_b", "ir_b_rel");
+      const std::string toneB = resolve(m, "tone_b", "tone_b_rel");
+      StageUnitBTone(0, modelB.c_str(), irB.c_str(), toneB.c_str());
+      mChainMainMorph = m.value("morph", 0.0);
     }
 
     // Global knobs + toggles (only valid when no chain unit is borrowing
@@ -1598,9 +2165,18 @@ void NeuralAmpModeler::ApplyRigPreset(const nlohmann::json& j)
           slot.bass = s.value("bass", 5.0);
           slot.middle = s.value("middle", 5.0);
           slot.treble = s.value("treble", 5.0);
+          // Tone Morph: this slot's B tone + morph
+          const std::string modelB = resolve(s, "model_b", "model_b_rel");
+          const std::string irB = resolve(s, "ir_b", "ir_b_rel");
+          const std::string toneB = resolve(s, "tone_b", "tone_b_rel");
+          StageUnitBTone(ci + 1, modelB.c_str(), irB.c_str(), toneB.c_str());
+          slot.morph = s.value("morph", 0.0);
         }
         else
+        {
           ClearChainSlot(ci);
+          ClearUnitB(ci + 1);
+        }
         if (mChainToneStacks[ci] != nullptr)
         {
           mChainToneStacks[ci]->SetParam("bass", mChainSlots[ci].bass.load());
@@ -1669,6 +2245,7 @@ void NeuralAmpModeler::BeginChainKnobEdit(int unit)
 void NeuralAmpModeler::EndChainKnobEdit()
 {
   mChainEditSlot = -1;
+  mChainEditTargetB = false;
   if (!mKnobEditActive)
     return;
   mKnobEditActive = false;
@@ -1696,7 +2273,22 @@ void NeuralAmpModeler::_UpdateBrowsersForEditSlot()
     else
       SendControlMsgFromDelegate(ctrlTag, kMsgTagClearedDisplay);
   };
-  if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+  if (mChainEditTargetB)
+  {
+    // Editing a unit's B (morph) side: show the B files.
+    if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
+    {
+      const ChainSlot& slot = mChainSlots[mChainEditSlot - 1];
+      send(kCtrlTagModelFileBrowser, kMsgTagLoadedModel, slot.modelBPath);
+      send(kCtrlTagIRFileBrowser, kMsgTagLoadedIR, slot.irBPath);
+    }
+    else
+    {
+      send(kCtrlTagModelFileBrowser, kMsgTagLoadedModel, mNAMPathB);
+      send(kCtrlTagIRFileBrowser, kMsgTagLoadedIR, mIRPathB);
+    }
+  }
+  else if (mChainEditSlot >= 1 && mChainEditSlot <= kNumChainSlots)
   {
     const ChainSlot& slot = mChainSlots[mChainEditSlot - 1];
     send(kCtrlTagModelFileBrowser, kMsgTagLoadedModel, slot.modelPath);
@@ -1752,6 +2344,16 @@ void NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
       mOutputArray[c].resize(numFrames);
       std::fill(mOutputArray[c].begin(), mOutputArray[c].end(), 0.0);
     }
+  }
+  // Tone Morph: keep the parallel B-branch scratch buffers sized to the block.
+  if (mMorphArrayA.size() != numFrames)
+    mMorphArrayA.assign(numFrames, 0.0);
+  if (mMorphArrayB.size() != numFrames)
+    mMorphArrayB.assign(numFrames, 0.0);
+  for (int ci = 0; ci < kNumChainSlots; ci++)
+  {
+    if (mChainArraysB[ci].size() != numFrames)
+      mChainArraysB[ci].assign(numFrames, 0.0);
   }
   // Would these ever get changed by something?
   for (auto c = 0; c < mInputArray.size(); c++)
