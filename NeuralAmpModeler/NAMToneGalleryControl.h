@@ -1692,8 +1692,404 @@ public:
     mMenuEntryIdx = -1;
   }
 
+  void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
+  {
+    const float maxScroll = MaxScroll();
+    const float next = std::min(maxScroll, std::max(0.0f, mScroll - d * 44.0f));
+    if (next != mScroll)
+    {
+      mScroll = next;
+      SetDirty(false);
+    }
+  }
 
-  [
-    output truncated at 50000 of 62774 characters.Pass a larger max_chars(default 50000) to see more,
-    or use read_page with a ref_id to focus on a smaller section.
-  ]
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    IControl::OnMouseOver(x, y, mod);
+    const bool overRefresh = RefreshRect().Contains(x, y);
+    int overChip = -1;
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+      if (ChipRect(i).Contains(x, y))
+        overChip = i;
+    const int idx = CardAt(x, y);
+    if (idx != mMouseOverCard || overRefresh != mMouseOverRefresh || overChip != mMouseOverChip)
+    {
+      mMouseOverCard = idx;
+      mMouseOverRefresh = overRefresh;
+      mMouseOverChip = overChip;
+      if (overRefresh)
+        SetTooltip("Rescan the tone folder");
+      else if (idx >= 0)
+      {
+        const tonegallery::ToneEntry& e = mEntries[mFiltered[idx]];
+        SetTooltip(e.description.empty() ? e.name.c_str() : e.description.c_str());
+      }
+      SetDirty(false);
+    }
+  }
+
+  void OnMouseOut() override
+  {
+    IControl::OnMouseOut();
+    mMouseOverCard = -1;
+    mMouseOverRefresh = false;
+    mMouseOverChip = -1;
+    SetDirty(false);
+  }
+
+private:
+  IRECT GridArea() const
+  {
+    return mRECT.GetReducedFromTop(kHeaderHeight + kFilterAreaHeight).GetPadded(-8.0f).GetReducedFromRight(2.0f);
+  }
+  IRECT RefreshRect() const { return mRECT.GetFromTop(kHeaderHeight).GetFromRight(30.0f).GetCentredInside(18.0f); }
+
+  float ContentHeight() const
+  {
+    const int numRows = ((int)mFiltered.size() + kNumCols - 1) / kNumCols;
+    return numRows * (kCardHeight + kCardGap);
+  }
+
+  float MaxScroll() const { return std::max(0.0f, ContentHeight() - GridArea().H()); }
+
+  // Pill-shaped category chips, flowing over two rows under the header.
+  IRECT ChipRect(int filter) const
+  {
+    const IRECT area = mRECT.GetReducedFromTop(kHeaderHeight).GetFromTop(kFilterAreaHeight).GetPadded(-6.0f);
+    const float gap = 5.0f;
+    float x = area.L, y = area.T;
+    for (int i = 0; i < tonegallery::kNumFilters; i++)
+    {
+      const float w = 14.0f + 5.4f * (float)strlen(tonegallery::FilterLabel(i));
+      if (x + w > area.R)
+      {
+        x = area.L;
+        y += kChipHeight + gap;
+      }
+      if (i == filter)
+        return IRECT(x, y, x + w, y + kChipHeight);
+      x += w + gap;
+    }
+    return IRECT();
+  }
+
+  IRECT CardRect(int filteredIdx) const
+  {
+    const IRECT grid = GridArea();
+    const int col = filteredIdx % kNumCols;
+    const int row = filteredIdx / kNumCols;
+    const float w = (grid.W() - kCardGap) / (float)kNumCols;
+    const float x = grid.L + col * (w + kCardGap);
+    const float y = grid.T + row * (kCardHeight + kCardGap) - mScroll;
+    return IRECT(x, y, x + w, y + kCardHeight);
+  }
+
+  int CardAt(float x, float y) const
+  {
+    if (!GridArea().Contains(x, y))
+      return -1;
+    for (int i = 0; i < (int)mFiltered.size(); i++)
+      if (CardRect(i).Contains(x, y))
+        return i;
+    return -1;
+  }
+
+  IBitmap* GetImage(const std::string& path)
+  {
+    if (path.empty())
+      return nullptr;
+    auto found = mImageCache.find(path);
+    if (found != mImageCache.end())
+      return found->second.GetAPIBitmap() ? &found->second : nullptr;
+    IBitmap bitmap;
+    try
+    {
+      if (std::filesystem::exists(tonegallery::UTF8ToPath(path)))
+        bitmap = GetUI()->LoadBitmap(path.c_str());
+    }
+    catch (const std::exception&)
+    {
+    }
+    auto inserted = mImageCache.insert({path, bitmap});
+    return inserted.first->second.GetAPIBitmap() ? &inserted.first->second : nullptr;
+  }
+
+  static void TwoLines(const std::string& s, size_t maxChars, std::string& line1, std::string& line2)
+  {
+    if (s.length() <= maxChars)
+    {
+      line1 = s;
+      line2 = "";
+      return;
+    }
+    // Prefer breaking at a space near the limit.
+    size_t breakAt = s.rfind(' ', maxChars);
+    if (breakAt == std::string::npos || breakAt < maxChars / 2)
+      breakAt = maxChars;
+    line1 = s.substr(0, breakAt);
+    line2 = tonegallery::Ellipsize(s.substr(breakAt == maxChars ? breakAt : breakAt + 1), maxChars);
+  }
+
+  void DrawCard(IGraphics& g, const tonegallery::ToneEntry& entry, const IRECT& card, bool mouseOver, const IRECT& grid)
+  {
+    const IColor gearColor = tonegallery::GearTypeColor(entry.gearType);
+
+    g.FillRoundRect(IColor(255, 32, 33, 41), card, 8.0f);
+
+    // Photo (cover-cropped into the top of the card)
+    const IRECT photo = card.GetFromTop(kPhotoHeight).GetPadded(-1.5f);
+    IBitmap* pBitmap = GetImage(entry.imagePath);
+    // NOTE: photo.Intersect(grid) is EMPTY when the photo is scrolled fully
+    // out of view, and an empty clip rect means "no clipping" -- which would
+    // splatter the full-size cover image over the whole UI. Only draw when
+    // the photo is actually (partly) visible.
+    const IRECT photoVis = photo.Intersect(grid);
+    if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0 && photoVis.W() > 0.5f && photoVis.H() > 0.5f)
+    {
+      const float bmpAspect = (float)pBitmap->W() / (float)pBitmap->H();
+      const float areaAspect = photo.W() / photo.H();
+      IRECT cover = photo;
+      if (bmpAspect > areaAspect)
+        cover = photo.GetMidHPadded(0.5f * photo.H() * bmpAspect); // wider: overflow left/right
+      else
+        cover = photo.GetMidVPadded(0.5f * photo.W() / bmpAspect); // taller: overflow top/bottom
+      g.PathClipRegion(photoVis);
+      g.DrawFittedBitmap(*pBitmap, cover);
+      g.PathClipRegion(grid);
+    }
+    else
+    {
+      g.FillRoundRect(gearColor.WithOpacity(0.15f), photo, 6.0f);
+      const IText initialText(15.0f, gearColor, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      std::string initials;
+      initials += entry.name.empty() ? '?' : (char)std::toupper((unsigned char)entry.name[0]);
+      g.DrawText(initialText, initials.c_str(), photo);
+    }
+
+    // Name (up to two lines)
+    const IRECT body = card.GetReducedFromTop(kPhotoHeight).GetPadded(-6.0f);
+    const IText nameText(8.5f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Top);
+    std::string n1, n2;
+    TwoLines(entry.name, 18, n1, n2);
+    g.DrawText(nameText, n1.c_str(), body.GetFromTop(10.0f));
+    if (!n2.empty())
+      g.DrawText(nameText, n2.c_str(), body.GetReducedFromTop(10.0f).GetFromTop(10.0f));
+
+    // Description (up to two lines)
+    const IText descText(7.5f, IColor(255, 120, 123, 132), "Inter-Regular", EAlign::Near, EVAlign::Top);
+    std::string d1, d2;
+    TwoLines(entry.description, 21, d1, d2);
+    const IRECT descArea = body.GetReducedFromTop(21.0f);
+    g.DrawText(descText, d1.c_str(), descArea.GetFromTop(9.0f));
+    if (!d2.empty())
+      g.DrawText(descText, d2.c_str(), descArea.GetReducedFromTop(9.0f).GetFromTop(9.0f));
+
+    // Gear chip + first tag
+    const IRECT tagRow = body.GetFromBottom(11.0f);
+    const char* gearLabel = tonegallery::GearTypeChipLabel(entry.gearType);
+    const float gearW = 10.0f + 4.6f * (float)strlen(gearLabel);
+    const IRECT gearChip = tagRow.GetFromLeft(gearW);
+    g.FillRoundRect(gearColor, gearChip, 4.0f);
+    const IText gearText(6.5f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    g.DrawText(gearText, gearLabel, gearChip);
+    if (!entry.tags.empty())
+    {
+      const std::string tag = tonegallery::Ellipsize(entry.tags.front(), 12);
+      const float tagW = 10.0f + 4.2f * (float)tag.length();
+      IRECT tagChip = tagRow.GetReducedFromLeft(gearW + 4.0f).GetFromLeft(tagW);
+      if (tagChip.R <= card.R - 4.0f)
+      {
+        g.FillRoundRect(IColor(18, 255, 255, 255), tagChip, 4.0f);
+        const IText tagText(6.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Center, EVAlign::Middle);
+        g.DrawText(tagText, tag.c_str(), tagChip);
+      }
+    }
+
+    // Border / hover glow / now-playing glow
+    const bool nowPlaying = !mNowPlayingDir.empty() && entry.directory == mNowPlayingDir;
+    if (mouseOver || nowPlaying)
+    {
+      g.DrawRoundRect(tonegallery::AccentColor().WithOpacity(0.25f), card.GetPadded(1.0f), 9.0f, nullptr, 3.0f);
+      g.DrawRoundRect(tonegallery::AccentColor(), card, 8.0f, nullptr, nowPlaying ? 1.6f : 1.2f);
+      if (nowPlaying)
+      {
+        const IRECT led = card.GetFromTop(kPhotoHeight).GetFromTRHC(16.0f, 16.0f).GetCentredInside(7.0f);
+        g.FillEllipse(tonegallery::AccentColor(), led);
+        g.DrawEllipse(COLOR_BLACK.WithOpacity(0.4f), led);
+      }
+    }
+    else
+    {
+      g.DrawRoundRect(IColor(18, 255, 255, 255), card, 8.0f);
+    }
+  }
+
+  std::vector<tonegallery::ToneEntry> mEntries;
+  std::vector<int> mFiltered;
+  std::string mNowPlayingDir;
+  int mFilter = tonegallery::kFilterAll;
+  float mScroll = 0.0f;
+  int mMouseOverCard = -1;
+  bool mMouseOverRefresh = false;
+  int mMouseOverChip = -1;
+  int mMenuEntryIdx = -1;
+  IPopupMenu mMenu;
+  std::map<std::string, IBitmap> mImageCache;
+  IFileDialogCompletionHandlerFunc mLoadModelFunc;
+  IFileDialogCompletionHandlerFunc mLoadIRFunc;
+};
+
+// The full-window overlay page, modeled on NAMSettingsPageControl.
+class NAMToneGalleryPageControl : public IContainerBaseWithNamedChildren
+{
+public:
+  NAMToneGalleryPageControl(const IRECT& bounds, const IBitmap& bitmap, ISVG closeSVG, const IVStyle& style,
+                            IFileDialogCompletionHandlerFunc loadModelFunc, IFileDialogCompletionHandlerFunc loadIRFunc)
+  : IContainerBaseWithNamedChildren(bounds)
+  , mBitmap(bitmap)
+  , mCloseSVG(closeSVG)
+  , mStyle(style)
+  , mLoadModelFunc(loadModelFunc)
+  , mLoadIRFunc(loadIRFunc)
+  {
+    mIgnoreMouse = false;
+  }
+
+  bool OnKeyDown(float x, float y, const IKeyPress& key) override
+  {
+    if (key.VK == kVK_ESCAPE)
+    {
+      HideAnimated(true);
+      return true;
+    }
+    return false;
+  }
+
+  void ShowAnimated()
+  {
+    Refresh();
+    HideAnimated(false);
+  }
+
+  void HideAnimated(bool hide)
+  {
+    mWillHide = hide;
+    if (hide == false)
+    {
+      mHide = false;
+    }
+    else // hide subcontrols immediately
+    {
+      ForAllChildrenFunc([hide](int childIdx, IControl* pChild) { pChild->Hide(hide); });
+    }
+
+    SetAnimation(
+      [&](IControl* pCaller) {
+        auto progress = static_cast<float>(pCaller->GetAnimationProgress());
+
+        if (mWillHide)
+          SetBlend(IBlend(EBlend::Default, 1.0f - progress));
+        else
+          SetBlend(IBlend(EBlend::Default, progress));
+
+        if (progress > 1.0f)
+        {
+          pCaller->OnEndAnimation();
+          IContainerBase::Hide(mWillHide);
+          GetUI()->SetAllControlsDirty();
+          return;
+        }
+      },
+      mAnimationTime);
+
+    SetDirty(true);
+  }
+
+  void Refresh()
+  {
+    const std::filesystem::path root = tonegallery::GetToneLibraryRoot();
+    auto entries = tonegallery::ScanToneLibrary(root);
+    if (auto* pGrid = GetGrid())
+      pGrid->SetEntries(std::move(entries), tonegallery::PathToUTF8(root));
+    // Keep the always-visible panels in sync too.
+    if (auto* pSidebar = GetUI()->GetControlWithTag(kCtrlTagToneSidebar))
+      pSidebar->As<NAMToneSidebarControl>()->Refresh();
+    if (auto* pFav = GetUI()->GetControlWithTag(kCtrlTagFavoritesBar))
+      pFav->As<NAMFavoritesBarControl>()->Reload();
+  }
+
+  void OnAttached() override
+  {
+    const float pad = 20.0f;
+    const IVStyle titleStyle =
+      DEFAULT_STYLE.WithValueText(IText(30, COLOR_WHITE, "Inter-Bold")).WithDrawFrame(false).WithShadowOffset(2.f);
+
+    AddNamedChildControl(new IPanelControl(GetRECT(), IColor(255, 14, 14, 17)), mControlNames.bitmap)
+      ->SetIgnoreMouse(true);
+
+    const auto titleArea = GetRECT().GetPadded(-(pad + 10.0f)).GetFromTop(50.0f);
+    AddNamedChildControl(new IVLabelControl(titleArea, "TONE GALLERY", titleStyle), mControlNames.title);
+
+    // Filter tabs
+    const auto contentArea = GetRECT().GetPadded(-(pad + 10.0f));
+    const auto filterArea = contentArea.GetReducedFromTop(52.0f).GetFromTop(26.0f).GetMidHPadded(250.0f);
+    auto onFilterChanged = [&](int filter) {
+      if (auto* pGrid = GetGrid())
+        pGrid->SetFilter(filter);
+    };
+    AddNamedChildControl(new NAMGalleryFilterControl(filterArea, onFilterChanged), mControlNames.filters);
+
+    // The grid
+    const auto gridArea = contentArea.GetReducedFromTop(88.0f).GetReducedFromBottom(6.0f);
+    auto onSelect = [&](const tonegallery::ToneEntry& entry) { LoadTone(entry); };
+    AddNamedChildControl(new NAMToneGridControl(gridArea, onSelect), mControlNames.grid);
+
+    // Open-library-folder button (bottom-left corner)
+    const auto folderButtonArea = GetRECT().GetPadded(-pad).GetFromBLHC(120.0f, 20.0f);
+    const IText linkText(13.0f, PluginColors::HELP_TEXT, "Inter-Regular", EAlign::Near, EVAlign::Middle);
+    auto openFolderAction = [](IControl* pCaller) {
+      const std::string root = tonegallery::PathToUTF8(tonegallery::GetToneLibraryRoot());
+      if (!root.empty())
+        pCaller->GetUI()->OpenURL(root.c_str());
+    };
+    auto* pFolderButton = new IVButtonControl(folderButtonArea, DefaultClickActionFunc, "Open tone folder",
+                                              mStyle.WithDrawFrame(false).WithValueText(linkText));
+    pFolderButton->SetAnimationEndActionFunction(openFolderAction);
+    AddNamedChildControl(pFolderButton, mControlNames.folder);
+
+    // Close button
+    auto closeAction = [&](IControl* pCaller) { HideAnimated(true); };
+    AddNamedChildControl(
+      new NAMSquareButtonControl(CornerButtonArea(GetRECT()), closeAction, mCloseSVG), mControlNames.close);
+
+    OnResize();
+  }
+
+private:
+  NAMToneGridControl* GetGrid() { return static_cast<NAMToneGridControl*>(GetNamedChild(mControlNames.grid)); }
+
+  void LoadTone(const tonegallery::ToneEntry& entry)
+  {
+    tonegallery::LoadToneEntryFiles(entry, mLoadModelFunc, mLoadIRFunc);
+    tonegallery::NotifyNowPlaying(GetUI(), entry, entry.modelPath, entry.irPath);
+    HideAnimated(true);
+  }
+
+  IBitmap mBitmap;
+  ISVG mCloseSVG;
+  IVStyle mStyle;
+  IFileDialogCompletionHandlerFunc mLoadModelFunc;
+  IFileDialogCompletionHandlerFunc mLoadIRFunc;
+  int mAnimationTime = 200;
+  bool mWillHide = false;
+
+  struct ControlNames
+  {
+    const std::string bitmap = "Bitmap";
+    const std::string close = "Close";
+    const std::string filters = "Filters";
+    const std::string folder = "Folder";
+    const std::string grid = "Grid";
+    const std::string title = "Title";
+  } mControlNames;
+};
