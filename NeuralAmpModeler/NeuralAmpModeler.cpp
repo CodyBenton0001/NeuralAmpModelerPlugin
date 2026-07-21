@@ -173,12 +173,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                              .GetReducedFromLeft(knobsPad)
                              .GetReducedFromRight(knobsPad)
                              .GetVShifted(titleHeight + knobsExtraSpaceBelowTitle);
-    const auto inputKnobArea = knobsArea.GetGridCell(0, kInputLevel, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto noiseGateArea = knobsArea.GetGridCell(0, kNoiseGateThreshold, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto bassKnobArea = knobsArea.GetGridCell(0, kToneBass, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto midKnobArea = knobsArea.GetGridCell(0, kToneMid, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto trebleKnobArea = knobsArea.GetGridCell(0, kToneTreble, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto outputKnobArea = knobsArea.GetGridCell(0, kOutputLevel, 1, numKnobs).GetPadded(-singleKnobPad);
+    // Tone Morph: one extra knob cell on the right of the row for the MORPH knob.
+    const int kKnobCols = numKnobs + 1;
+    const auto inputKnobArea = knobsArea.GetGridCell(0, kInputLevel, 1, kKnobCols).GetPadded(-singleKnobPad);
+    const auto noiseGateArea = knobsArea.GetGridCell(0, kNoiseGateThreshold, 1, kKnobCols).GetPadded(-singleKnobPad);
+    const auto bassKnobArea = knobsArea.GetGridCell(0, kToneBass, 1, kKnobCols).GetPadded(-singleKnobPad);
+    const auto midKnobArea = knobsArea.GetGridCell(0, kToneMid, 1, kKnobCols).GetPadded(-singleKnobPad);
+    const auto trebleKnobArea = knobsArea.GetGridCell(0, kToneTreble, 1, kKnobCols).GetPadded(-singleKnobPad);
+    const auto outputKnobArea = knobsArea.GetGridCell(0, kOutputLevel, 1, kKnobCols).GetPadded(-singleKnobPad);
+    const auto morphKnobArea = knobsArea.GetGridCell(0, numKnobs, 1, kKnobCols).GetPadded(-singleKnobPad);
 
     const auto ngToggleArea =
       noiseGateArea.GetVShifted(noiseGateArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
@@ -190,11 +193,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto irYOffset = 38.0f;
     const auto modelArea =
       contentArea.GetFromBottom((2.0f * fileHeight)).GetFromTop(fileHeight).GetMidHPadded(fileWidth).GetVShifted(-1);
-    const auto slimIconArea =
-      IRECT(modelArea.R + 6.f, modelArea.MH() - 14.f, modelArea.R + 6.f + 2.f * 28.f, modelArea.MH() + 14.f);
     const auto modelIconArea = modelArea.GetFromLeft(30).GetTranslated(-40, 10);
     const auto irArea = modelArea.GetVShifted(irYOffset);
     const auto irSwitchArea = irArea.GetFromLeft(30.0f).GetHShifted(-40.0f).GetScaledAboutCentre(0.6f);
+    // Tone Morph: slim icon moved next to the IR box (the model box is hidden),
+    // and the A TONE / B TONE cards sit just above the IR box.
+    const auto slimIconArea =
+      IRECT(irArea.R + 6.f, irArea.MH() - 14.f, irArea.R + 6.f + 2.f * 28.f, irArea.MH() + 14.f);
+    const auto morphCardsArea = IRECT(contentArea.L + 26.0f, irArea.T - 62.0f, contentArea.R - 26.0f, irArea.T - 6.0f);
 
     // Areas for meters
     const auto inputMeterArea = contentArea.GetFromLeft(30).GetHShifted(-20).GetMidVPadded(100).GetVShifted(-25);
@@ -213,9 +219,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       if (fileName.GetLength())
       {
         // Tone Morph: while targeting a unit's B side, the load goes there.
-        if (mChainEditTargetB && mChainEditSlot >= 0 && mChainEditSlot <= kNumChainSlots)
+        if (mChainEditTargetB && mChainEditSlot <= kNumChainSlots)
         {
-          const int unit = mChainEditSlot;
+          const int unit = mChainEditSlot >= 1 ? mChainEditSlot : 0;
           if (strcmp(GetUnitBTonePath(unit), path.Get()) != 0)
           {
             // New tone folder for B: clear the B IR so tones swap cleanly.
@@ -241,6 +247,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
           if (GetUnitMorph(unit) < 0.0001)
             SetUnitMorph(unit, 0.5); // make the newly loaded B tone audible
           _UpdateBrowsersForEditSlot();
+          if (GetUI())
+            GetUI()->SetAllControlsDirty();
           return;
         }
         // Tone Gallery fork: while editing a chain unit, loads go to that
@@ -278,9 +286,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       if (fileName.GetLength())
       {
         // Tone Morph: while targeting a unit's B side, the IR goes there.
-        if (mChainEditTargetB && mChainEditSlot >= 0 && mChainEditSlot <= kNumChainSlots)
+        if (mChainEditTargetB && mChainEditSlot <= kNumChainSlots)
         {
-          const int unit = mChainEditSlot;
+          const int unit = mChainEditSlot >= 1 ? mChainEditSlot : 0;
           if (strcmp(GetUnitBTonePath(unit), path.Get()) != 0)
           {
             // New tone folder: an IR-only (cab) B clears the B amp model.
@@ -306,6 +314,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
           if (GetUnitMorph(unit) < 0.0001)
             SetUnitMorph(unit, 0.5); // make the newly loaded B tone audible
           _UpdateBrowsersForEditSlot();
+          if (GetUI())
+            GetUI()->SetAllControlsDirty();
           return;
         }
         // Tone Gallery fork: route into the chain slot being edited. An
@@ -344,7 +354,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Title, centered between the TONE3000 and SIGNAL CHAIN buttons.
     pGraphics->AttachControl(
       new ThemedTitleControl(IRECT(t3kButtonArea.R + 8.0f, titleArea.T, chainButtonArea.L - 8.0f, titleArea.B)));
-    pGraphics->AttachControl(new ISVGControl(modelIconArea, modelIconSVG));
+    // Tone Morph: the model box + its icon are hidden; the A/B TONE cards
+    // (attached below) take their place above the IR box.
 
 #ifdef NAM_PICK_DIRECTORY
     const std::string defaultNamFileString = "Select model directory...";
@@ -355,11 +366,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 #endif
     // Getting started page listing additional resources
     const char* const getUrl = "https://www.neuralampmodeler.com/users#comp-marb84o5";
-    pGraphics->AttachControl(
-      new ThemedFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
-                                   loadModelCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                   fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl, namtheme::Accent()),
-      kCtrlTagModelFileBrowser);
+    pGraphics
+      ->AttachControl(
+        new ThemedFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
+                                     loadModelCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                     fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl, namtheme::Accent()),
+        kCtrlTagModelFileBrowser)
+      ->Hide(true); // Tone Morph: model box hidden; the A/B cards replace it
 
     auto hideSlimOverlay = [](IControl* pCaller) {
       IGraphics* ui = pCaller->GetUI();
@@ -400,6 +413,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new ThemedKnobControl(midKnobArea, kToneMid, "MIDDLE", style), -1, "EQ_KNOBS");
     pGraphics->AttachControl(new ThemedKnobControl(trebleKnobArea, kToneTreble, "TREBLE", style), -1, "EQ_KNOBS");
     pGraphics->AttachControl(new ThemedKnobControl(outputKnobArea, kOutputLevel, "OUTPUT", style));
+    // Tone Morph: the MORPH knob (top row) + the A TONE / B TONE cards.
+    pGraphics->AttachControl(new NAMMorphKnobControl(morphKnobArea));
+    pGraphics->AttachControl(new NAMMorphCardsControl(morphCardsArea), kCtrlTagMorphCards);
 
     // The meters
     pGraphics->AttachControl(new ThemedMeterControl(inputMeterArea, style), kCtrlTagInputMeter);
