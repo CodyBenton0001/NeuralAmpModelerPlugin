@@ -33,7 +33,7 @@ public:
     SetTooltip("MORPH: blend from the A tone to the B tone");
   }
 
-  int FocusUnit() const { return PLUG()->mChainEditSlot >= 1 ? PLUG()->mChainEditSlot : 0; }
+  int FocusUnit() { return PLUG()->mChainEditSlot >= 1 ? PLUG()->mChainEditSlot : 0; }
 
   void Draw(IGraphics& g) override
   {
@@ -150,7 +150,7 @@ public:
   {
   }
 
-  int FocusUnit() const { return PLUG()->mChainEditSlot >= 1 ? PLUG()->mChainEditSlot : 0; }
+  int FocusUnit() { return PLUG()->mChainEditSlot >= 1 ? PLUG()->mChainEditSlot : 0; }
 
   void SetNowPlaying(const tonegallery::ToneEntry& entry, const std::string& modelPath,
                      const std::string& irPath) override
