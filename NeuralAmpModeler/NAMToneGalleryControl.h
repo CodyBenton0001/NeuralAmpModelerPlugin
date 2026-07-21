@@ -1316,33 +1316,40 @@ public:
     g.DrawText(loadText, "LOAD TONE", mLoadButtonRect);
     y += 32.0f;
 
-    // Description
+    // Description + variants share one scrolling region, so the FULL
+    // description shows without ever squeezing the variant list.
+    const float scrollTop = y;
+    mScrollTop = scrollTop;
+    const IRECT scrollRegion(mRECT.L, scrollTop, mRECT.R, mRECT.B - 8.0f);
+    g.PathClipRegion(scrollRegion);
+    float sy = scrollTop - mScroll;
+
+    // Description (full text, wrapped)
     if (!mEntry.description.empty())
     {
       const IText descText(9.0f, IColor(255, 150, 153, 162), "Inter-Regular", EAlign::Near, EVAlign::Top);
-      for (const auto& line : tonegallery::WrapLines(mEntry.description, 40, 6))
+      for (const auto& line : tonegallery::WrapLines(mEntry.description, 40, 200))
       {
-        g.DrawText(descText, line.c_str(), IRECT(body.L, y, body.R, y + 11.0f));
-        y += 11.5f;
+        g.DrawText(descText, line.c_str(), IRECT(body.L, sy, body.R, sy + 11.0f));
+        sy += 11.5f;
       }
-      y += 6.0f;
+      sy += 8.0f;
     }
 
-    // Variants
+    // Variants header
     const int numVariants = (int)(mEntry.models.size() + mEntry.irs.size());
     std::stringstream header;
     header << "VARIANTS (" << numVariants << ")";
     const IText headerText(9.0f, IColor(255, 139, 142, 152), "Inter-Bold", EAlign::Near, EVAlign::Top);
-    g.DrawText(headerText, header.str().c_str(), IRECT(body.L, y, body.R, y + 12.0f));
-    y += 15.0f;
+    g.DrawText(headerText, header.str().c_str(), IRECT(body.L, sy, body.R, sy + 12.0f));
+    sy += 16.0f;
 
-    mListTop = y;
-    const IRECT list(body.L, y, body.R, mRECT.B - 8.0f);
-    g.PathClipRegion(list);
+    // Variant rows (RowRect uses mListTop, which is already the scrolled top)
+    mListTop = sy;
     for (int i = 0; i < numVariants; i++)
     {
       const IRECT row = RowRect(i);
-      if (row.B < list.T || row.T > list.B)
+      if (row.B < scrollRegion.T || row.T > scrollRegion.B)
         continue;
       const bool isIR = i >= (int)mEntry.models.size();
       const std::string& path = isIR ? mEntry.irs[i - mEntry.models.size()] : mEntry.models[i];
@@ -1355,12 +1362,12 @@ public:
       g.FillRoundRect(typeColor.WithOpacity(0.2f), typeChip, 3.0f);
       const IText typeText(7.0f, typeColor, "Inter-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(typeText, isIR ? "IR" : "M", typeChip);
-      // Name (filename without extension)
+      // Full variant name (filename without extension)
       const std::string stem = tonegallery::PathToUTF8(tonegallery::UTF8ToPath(path).stem());
       const IText rowText(
-        9.5f, nowPlaying ? COLOR_WHITE : IColor(255, 190, 193, 202), "Inter-Regular", EAlign::Near, EVAlign::Middle);
+        9.0f, nowPlaying ? COLOR_WHITE : IColor(255, 190, 193, 202), "Inter-Regular", EAlign::Near, EVAlign::Middle);
       g.DrawText(
-        rowText, tonegallery::Ellipsize(stem, 30).c_str(), row.GetReducedFromLeft(28.0f).GetReducedFromRight(12.0f));
+        rowText, tonegallery::Ellipsize(stem, 72).c_str(), row.GetReducedFromLeft(28.0f).GetReducedFromRight(16.0f));
       // Now-playing LED
       if (nowPlaying)
       {
@@ -1368,16 +1375,19 @@ public:
         g.FillEllipse(accent, led);
       }
     }
-    // Scrollbar for variants
-    const float contentH = numVariants * kRowHeight;
-    if (contentH > list.H())
+    sy += numVariants * kRowHeight;
+
+    // Total scrollable content height (for the scrollbar + wheel clamp).
+    mScrollContentH = sy - (scrollTop - mScroll);
+    const float regionH = scrollRegion.H();
+    if (mScrollContentH > regionH)
     {
-      const float frac = list.H() / contentH;
-      const float barH = std::max(16.0f, frac * list.H());
-      const float travel = list.H() - barH;
-      const float pos = (mScroll / (contentH - list.H())) * travel;
-      g.FillRoundRect(
-        accent.WithOpacity(0.5f), IRECT(mRECT.R - 4.0f, list.T + pos, mRECT.R - 2.0f, list.T + pos + barH), 1.0f);
+      const float frac = regionH / mScrollContentH;
+      const float barH = std::max(16.0f, frac * regionH);
+      const float travel = regionH - barH;
+      const float pos = (mScroll / (mScrollContentH - regionH)) * travel;
+      g.FillRoundRect(accent.WithOpacity(0.5f),
+                      IRECT(mRECT.R - 4.0f, scrollRegion.T + pos, mRECT.R - 2.0f, scrollRegion.T + pos + barH), 1.0f);
     }
     g.PathClipRegion();
   }
@@ -1421,9 +1431,8 @@ public:
 
   void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
   {
-    const int numVariants = (int)(mEntry.models.size() + mEntry.irs.size());
-    const float listH = mRECT.B - 8.0f - mListTop;
-    const float maxScroll = std::max(0.0f, numVariants * kRowHeight - listH);
+    const float regionH = mRECT.B - 8.0f - mScrollTop;
+    const float maxScroll = std::max(0.0f, mScrollContentH - regionH);
     const float next = std::min(maxScroll, std::max(0.0f, mScroll - d * 30.0f));
     if (next != mScroll)
     {
@@ -1461,16 +1470,16 @@ private:
 
   IRECT RowRect(int i) const
   {
-    const float y = mListTop + i * kRowHeight - mScroll;
+    const float y = mListTop + i * kRowHeight;
     return IRECT(mRECT.L + 10.0f, y, mRECT.R - 10.0f, y + kRowHeight);
   }
 
   int RowAt(float x, float y) const
   {
-    if (y < mListTop || y > mRECT.B - 8.0f)
+    if (y < mScrollTop || y > mRECT.B - 8.0f)
       return -1;
     const int numVariants = (int)(mEntry.models.size() + mEntry.irs.size());
-    const int idx = (int)((y - mListTop + mScroll) / kRowHeight);
+    const int idx = (int)((y - mListTop) / kRowHeight);
     return (idx >= 0 && idx < numVariants) ? idx : -1;
   }
 
@@ -1500,6 +1509,8 @@ private:
   std::string mNowPlayingIR;
   float mScroll = 0.0f;
   float mListTop = 0.0f;
+  float mScrollTop = 0.0f;
+  float mScrollContentH = 0.0f;
   IRECT mLoadButtonRect;
   bool mMouseOverClose = false;
   bool mMouseOverLoad = false;
