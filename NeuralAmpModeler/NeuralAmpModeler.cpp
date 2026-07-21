@@ -19,6 +19,7 @@
 #include "NAMToneGalleryControl.h"
 #include "NAMTheme.h"
 #include "NAMTone3000Browser.h"
+#include "NAMRigPresets.h"
 #include "NAMChainView.h"
 
 using namespace iplug;
@@ -698,7 +699,7 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
   // Tone Gallery fork: append the signal-chain block. Old versions of the
   // plugin simply never read this far, so this stays backwards-compatible.
-  chunk.PutStr("###NAMChainV2###");
+  chunk.PutStr("###NAMChainV3###");
   int mainEnabled = mChainMainEnabled.load() ? 1 : 0;
   double mainLevel = mChainMainLevelDB.load();
   int chainMode = mToneChainMode ? 1 : 0;
@@ -725,6 +726,8 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
     chunk.Put(&middle);
     chunk.Put(&treble);
   }
+  // V3: which rig preset is loaded (so SAVE knows what to overwrite)
+  chunk.PutStr(mRigPresetRel.Get());
   return ok;
 }
 
@@ -734,6 +737,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
   mChainMainEnabled = true;
   mChainMainLevelDB = 0.0;
   mToneChainMode = false;
+  mRigPresetRel.Set("");
   for (int ci = 0; ci < kNumChainSlots; ci++)
   {
     ChainSlot& slot = mChainSlots[ci];
@@ -754,7 +758,8 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
   int pos = chunk.GetStr(marker, startPos);
   const bool isV1 = pos > startPos && strcmp(marker.Get(), "###NAMChainV1###") == 0;
   const bool isV2 = pos > startPos && strcmp(marker.Get(), "###NAMChainV2###") == 0;
-  if (!isV1 && !isV2)
+  const bool isV3 = pos > startPos && strcmp(marker.Get(), "###NAMChainV3###") == 0;
+  if (!isV1 && !isV2 && !isV3)
     return startPos; // no chain block in this save
 
   int mainEnabled = 1, chainMode = 0;
@@ -794,7 +799,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     if (pos < 0)
       return startPos;
     double inputDB = 0.0, bass = 5.0, middle = 5.0, treble = 5.0;
-    if (isV2)
+    if (isV2 || isV3)
     {
       pos = chunk.Get(&inputDB, pos);
       if (pos < 0)
@@ -822,6 +827,17 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
       mChainToneStacks[ci]->SetParam("treble", treble);
     }
     SetChainTone(ci, modelPath.Get(), irPath.Get(), tonePath.Get());
+  }
+  // V3: the loaded rig preset path
+  if (isV3)
+  {
+    WDL_String rigRel;
+    const int p2 = chunk.GetStr(rigRel, pos);
+    if (p2 > 0)
+    {
+      mRigPresetRel = rigRel;
+      pos = p2;
+    }
   }
   return pos;
 }
@@ -1378,6 +1394,250 @@ void NeuralAmpModeler::SetChainTone(int slot, const char* modelPath, const char*
   _StageChainModel(slot, modelPath);
   _StageChainIR(slot, irPath);
   mChainSlots[slot].tonePath.Set(tonePath != nullptr ? tonePath : "");
+}
+
+// --- Rig presets ------------------------------------------------------------
+
+nlohmann::json NeuralAmpModeler::CaptureRigPreset() const
+{
+  namespace fs = std::filesystem;
+  auto relOf = [](const char* abs) -> std::string {
+    try
+    {
+      if (abs == nullptr || abs[0] == '\0')
+        return "";
+      const fs::path root = tonegallery::GetToneLibraryRoot();
+      const fs::path p = tonegallery::UTF8ToPath(abs);
+      const fs::path rel = p.lexically_relative(root);
+      const std::string r = tonegallery::PathToUTF8(rel);
+      if (!r.empty() && r.rfind("..", 0) != 0 && rel.is_relative())
+        return r;
+    }
+    catch (const std::exception&)
+    {
+    }
+    return "";
+  };
+  auto peekName = [](const char* tone, const char* model, const char* ir) -> std::string {
+    try
+    {
+      if (tone != nullptr && tone[0] != '\0')
+        return tonegallery::PathToUTF8(tonegallery::UTF8ToPath(tone).filename());
+      const char* f = (model != nullptr && model[0] != '\0') ? model : ir;
+      if (f != nullptr && f[0] != '\0')
+        return tonegallery::PathToUTF8(tonegallery::UTF8ToPath(f).stem());
+    }
+    catch (const std::exception&)
+    {
+    }
+    return "Empty";
+  };
+
+  nlohmann::json j;
+  j["format"] = "namrig-v1";
+  nlohmann::json peek = nlohmann::json::array();
+
+  // Unit 1 (the main model + IR)
+  {
+    nlohmann::json m;
+    m["model"] = std::string(mNAMPath.Get());
+    m["model_rel"] = relOf(mNAMPath.Get());
+    m["ir"] = std::string(mIRPath.Get());
+    m["ir_rel"] = relOf(mIRPath.Get());
+    m["enabled"] = mChainMainEnabled.load();
+    m["level"] = mChainMainLevelDB.load();
+    j["main"] = m;
+    // Display name: the tone folder if it's in the library, else the file.
+    std::string disp = "Empty";
+    try
+    {
+      const char* f = mNAMPath.GetLength() ? mNAMPath.Get() : mIRPath.Get();
+      if (f != nullptr && f[0] != '\0')
+        disp = !relOf(f).empty() ? tonegallery::PathToUTF8(tonegallery::UTF8ToPath(f).parent_path().filename())
+                                 : tonegallery::PathToUTF8(tonegallery::UTF8ToPath(f).stem());
+    }
+    catch (const std::exception&)
+    {
+    }
+    peek.push_back(disp);
+  }
+
+  // Global knobs + toggles. If a chain unit is borrowing the knobs right
+  // now, the params hold the SLOT's values -- use the main backup instead.
+  {
+    nlohmann::json p;
+    const bool useBackup = mKnobEditActive;
+    p["input"] = useBackup ? mMainKnobBackup[0] : GetParam(kInputLevel)->Value();
+    p["bass"] = useBackup ? mMainKnobBackup[1] : GetParam(kToneBass)->Value();
+    p["middle"] = useBackup ? mMainKnobBackup[2] : GetParam(kToneMid)->Value();
+    p["treble"] = useBackup ? mMainKnobBackup[3] : GetParam(kToneTreble)->Value();
+    p["output"] = useBackup ? mMainKnobBackup[4] : GetParam(kOutputLevel)->Value();
+    p["gate_threshold"] = GetParam(kNoiseGateThreshold)->Value();
+    p["gate_on"] = GetParam(kNoiseGateActive)->Bool();
+    p["eq_on"] = GetParam(kEQActive)->Bool();
+    p["ir_on"] = GetParam(kIRToggle)->Bool();
+    j["params"] = p;
+  }
+
+  // The extra chain slots
+  {
+    nlohmann::json slots = nlohmann::json::array();
+    for (int ci = 0; ci < kNumChainSlots; ci++)
+    {
+      const ChainSlot& slot = mChainSlots[ci];
+      nlohmann::json s;
+      s["model"] = std::string(slot.modelPath.Get());
+      s["model_rel"] = relOf(slot.modelPath.Get());
+      s["ir"] = std::string(slot.irPath.Get());
+      s["ir_rel"] = relOf(slot.irPath.Get());
+      s["tone"] = std::string(slot.tonePath.Get());
+      s["tone_rel"] = relOf(slot.tonePath.Get());
+      s["enabled"] = slot.enabled.load();
+      s["level"] = slot.levelDB.load();
+      s["input"] = slot.inputDB.load();
+      s["bass"] = slot.bass.load();
+      s["middle"] = slot.middle.load();
+      s["treble"] = slot.treble.load();
+      slots.push_back(s);
+      peek.push_back(peekName(slot.tonePath.Get(), slot.modelPath.Get(), slot.irPath.Get()));
+    }
+    j["slots"] = slots;
+  }
+  j["peek"] = peek;
+  return j;
+}
+
+void NeuralAmpModeler::ApplyRigPreset(const nlohmann::json& j)
+{
+  namespace fs = std::filesystem;
+  auto resolve = [](const nlohmann::json& obj, const char* absKey, const char* relKey) -> std::string {
+    try
+    {
+      const std::string rel = obj.value(relKey, "");
+      if (!rel.empty())
+      {
+        const fs::path p = tonegallery::GetToneLibraryRoot() / tonegallery::UTF8ToPath(rel);
+        if (fs::exists(p))
+          return tonegallery::PathToUTF8(p);
+      }
+      const std::string abs = obj.value(absKey, "");
+      if (!abs.empty() && fs::exists(tonegallery::UTF8ToPath(abs)))
+        return abs;
+    }
+    catch (const std::exception&)
+    {
+    }
+    return "";
+  };
+  try
+  {
+    // Unit 1 (main)
+    if (j.contains("main"))
+    {
+      const auto& m = j["main"];
+      const std::string model = resolve(m, "model", "model_rel");
+      const std::string ir = resolve(m, "ir", "ir_rel");
+      if (!model.empty())
+        _StageModel(WDL_String(model.c_str()));
+      else
+      {
+        mShouldRemoveModel = true;
+        mNAMPath.Set("");
+        SendControlMsgFromDelegate(kCtrlTagModelFileBrowser, kMsgTagClearedDisplay);
+      }
+      if (!ir.empty())
+        _StageIR(WDL_String(ir.c_str()));
+      else
+      {
+        mShouldRemoveIR = true;
+        mIRPath.Set("");
+        SendControlMsgFromDelegate(kCtrlTagIRFileBrowser, kMsgTagClearedDisplay);
+      }
+      mChainMainEnabled = m.value("enabled", true);
+      mChainMainLevelDB = m.value("level", 0.0);
+    }
+
+    // Global knobs + toggles (only valid when no chain unit is borrowing
+    // the knobs; presets are loaded from the chain view, where that's true)
+    if (j.contains("params") && mChainEditSlot < 1)
+    {
+      const auto& p = j["params"];
+      _SetKnobParamAndNotify(kInputLevel, p.value("input", 0.0));
+      _SetKnobParamAndNotify(kNoiseGateThreshold, p.value("gate_threshold", -80.0));
+      _SetKnobParamAndNotify(kToneBass, p.value("bass", 5.0));
+      _SetKnobParamAndNotify(kToneMid, p.value("middle", 5.0));
+      _SetKnobParamAndNotify(kToneTreble, p.value("treble", 5.0));
+      _SetKnobParamAndNotify(kOutputLevel, p.value("output", 0.0));
+      auto setToggle = [&](int idx, const char* key, bool defv) {
+        GetParam(idx)->Set(p.value(key, defv) ? 1.0 : 0.0);
+        SendParameterValueFromDelegate(idx, GetParam(idx)->GetNormalized(), true);
+        OnParamChange(idx);
+        OnParamChangeUI(idx, iplug::EParamSource::kPresetRecall);
+      };
+      setToggle(kNoiseGateActive, "gate_on", true);
+      setToggle(kEQActive, "eq_on", true);
+      setToggle(kIRToggle, "ir_on", true);
+    }
+
+    // The extra chain slots
+    if (j.contains("slots") && j["slots"].is_array())
+    {
+      for (int ci = 0; ci < kNumChainSlots; ci++)
+      {
+        if (ci < (int)j["slots"].size())
+        {
+          const auto& s = j["slots"][ci];
+          const std::string model = resolve(s, "model", "model_rel");
+          const std::string ir = resolve(s, "ir", "ir_rel");
+          const std::string tone = resolve(s, "tone", "tone_rel");
+          SetChainTone(ci, model.c_str(), ir.c_str(), tone.c_str());
+          ChainSlot& slot = mChainSlots[ci];
+          slot.enabled = s.value("enabled", true);
+          slot.levelDB = s.value("level", 0.0);
+          slot.inputDB = s.value("input", 0.0);
+          slot.bass = s.value("bass", 5.0);
+          slot.middle = s.value("middle", 5.0);
+          slot.treble = s.value("treble", 5.0);
+        }
+        else
+          ClearChainSlot(ci);
+        if (mChainToneStacks[ci] != nullptr)
+        {
+          mChainToneStacks[ci]->SetParam("bass", mChainSlots[ci].bass.load());
+          mChainToneStacks[ci]->SetParam("middle", mChainSlots[ci].middle.load());
+          mChainToneStacks[ci]->SetParam("treble", mChainSlots[ci].treble.load());
+        }
+      }
+    }
+
+    // Refresh the "now playing" displays from the new main tone.
+    if (GetUI() != nullptr)
+    {
+      tonegallery::ToneEntry match; // empty = clears the glow
+      try
+      {
+        if (mNAMPath.GetLength())
+        {
+          const auto modelDir = std::filesystem::u8path(mNAMPath.Get()).parent_path();
+          for (const auto& entry : tonegallery::ScanToneLibrary(tonegallery::GetToneLibraryRoot()))
+          {
+            if (tonegallery::UTF8ToPath(entry.directory) == modelDir)
+            {
+              match = entry;
+              break;
+            }
+          }
+        }
+      }
+      catch (const std::exception&)
+      {
+      }
+      tonegallery::NotifyNowPlaying(GetUI(), match, mNAMPath.Get(), mIRPath.Get(), /* force */ true);
+    }
+  }
+  catch (const std::exception&)
+  {
+  }
 }
 
 void NeuralAmpModeler::BeginChainKnobEdit(int unit)
