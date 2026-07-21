@@ -223,9 +223,9 @@ public:
 
   // --- Tone Gallery fork: signal chain -------------------------------------
   // The plugin can run a chain of up to 4 tone units in series:
-  //   unit 1 = the plugin's regular model + IR (mModel / mIR)
-  //   units 2..4 = the extra ChainSlots below, each model -> IR -> level,
-  //                processed right after unit 1's IR, before the DC blocker.
+  // unit 1 = the plugin's regular model + IR (mModel / mIR)
+  // units 2..4 = the extra ChainSlots below, each model -> IR -> level,
+  // processed right after unit 1's IR, before the DC blocker.
   // Each unit has a bypass and an output level. All of it is serialized with
   // the project (see the ###NAMChainV1### block in Serialization).
   static constexpr int kNumChainSlots = 3; // extra units beyond the main one
@@ -255,6 +255,18 @@ public:
     std::atomic<double> bass{5.0};
     std::atomic<double> middle{5.0};
     std::atomic<double> treble{5.0};
+    // --- Tone Morph: a second complete tone (its own model + IR) that this
+    // unit blends toward. morph 0 = A only, 1 = B only (equal-power crossfade).
+    std::unique_ptr<ResamplingNAM> modelB;
+    std::unique_ptr<dsp::ImpulseResponse> irB;
+    std::unique_ptr<ResamplingNAM> stagedModelB;
+    std::unique_ptr<dsp::ImpulseResponse> stagedIRB;
+    std::atomic<bool> removeModelB{false};
+    std::atomic<bool> removeIRB{false};
+    WDL_String modelBPath;
+    WDL_String irBPath;
+    WDL_String toneBPath;
+    std::atomic<double> morph{0.0};
   };
 
   std::array<ChainSlot, kNumChainSlots> mChainSlots;
@@ -264,10 +276,14 @@ public:
   // Whether the stacked chain view is showing (persists across editor reopen)
   bool mToneChainMode = false;
   // Which chain unit the full UI is currently choosing a tone for:
-  //   -1 = not editing (loads go to the main model as usual)
-  //    0 = unit 1 (the main model), 1..kNumChainSlots = the extra slots.
+  // -1 = not editing (loads go to the main model as usual)
+  // 0 = unit 1 (the main model), 1..kNumChainSlots = the extra slots.
   // While >= 1, the model/IR load handlers route into that chain slot.
   int mChainEditSlot = -1;
+  // While editing a unit, whether tone loads target its B (morph) side
+  // instead of its A side. Set by the chain view before it hands off to
+  // the full editor; reset by EndChainKnobEdit.
+  bool mChainEditTargetB = false;
 
   // Load a tone into an extra chain slot (0..kNumChainSlots-1). Empty paths
   // clear that part of the slot. Called from the UI thread.
@@ -280,6 +296,21 @@ public:
   // restored when editing ends).
   void BeginChainKnobEdit(int unit);
   void EndChainKnobEdit();
+
+  // --- Tone Morph API ------------------------------------------------------
+  // unit 0 = the main model (mModel/mIR), 1..kNumChainSlots = the extra slots.
+  // "B" is the second tone the unit's MORPH knob blends toward.
+  void StageUnitBTone(int unit, const char* modelPath, const char* irPath, const char* tonePath);
+  void ClearUnitB(int unit);
+  void SetUnitMorph(int unit, double amt01);
+  double GetUnitMorph(int unit) const;
+  bool UnitHasB(int unit) const;
+  const char* GetUnitBTonePath(int unit) const;
+  void SetChainEditTargetB(bool b)
+  {
+    mChainEditTargetB = b;
+    _UpdateBrowsersForEditSlot();
+  }
 
   // --- Rig presets (see NAMRigPresets.h) ----------------------------------
   // Capture the ENTIRE current rig (main model/IR, global knobs + toggles,
@@ -339,6 +370,11 @@ private:
   // SetChainTone and by unserialization.
   void _StageChainModel(int slot, const char* modelPath);
   void _StageChainIR(int slot, const char* irPath);
+  // Tone Morph: stage the "B" model/IR for a unit (0 = main, 1.. = slots).
+  std::string _StageModelB(const WDL_String& modelPath);
+  dsp::wav::LoadReturnCode _StageIRB(const WDL_String& irPath);
+  void _StageChainModelB(int slot, const char* modelPath);
+  void _StageChainIRB(int slot, const char* irPath);
   // Set a knob param's value, update the on-screen knob, and apply it.
   void _SetKnobParamAndNotify(int paramIdx, double value);
   // Point the model/IR file browsers at whatever the current edit target is
@@ -394,6 +430,19 @@ private:
   std::atomic<bool> mShouldRemoveModel = false;
   std::atomic<bool> mShouldRemoveIR = false;
 
+  // --- Tone Morph for the main unit (unit 0) ------------------------------
+  // A second model + IR the main tone blends toward via mChainMainMorph.
+  std::unique_ptr<ResamplingNAM> mModelB;
+  std::unique_ptr<dsp::ImpulseResponse> mIRB;
+  std::unique_ptr<ResamplingNAM> mStagedModelB;
+  std::unique_ptr<dsp::ImpulseResponse> mStagedIRB;
+  std::atomic<bool> mShouldRemoveModelB = false;
+  std::atomic<bool> mShouldRemoveIRB = false;
+  WDL_String mNAMPathB;
+  WDL_String mIRPathB;
+  WDL_String mMainToneBPath;
+  std::atomic<double> mChainMainMorph{0.0};
+
   std::atomic<bool> mNewModelLoadedInDSP = false;
   std::atomic<bool> mModelCleared = false;
 
@@ -410,6 +459,12 @@ private:
   std::array<iplug::sample*, kNumChainSlots> mChainScratchPointers{};
   // Per-slot tone stacks (only run when a slot's EQ is moved off flat).
   std::array<std::unique_ptr<dsp::tone_stack::AbstractToneStack>, kNumChainSlots> mChainToneStacks;
+  // Tone Morph: parallel "B" scratch buffers (mono). The A branch reuses
+  // mChainArrays; the B branch and the two main-unit branches get their own.
+  std::array<std::vector<iplug::sample>, kNumChainSlots> mChainArraysB;
+  std::array<iplug::sample*, kNumChainSlots> mChainScratchPointersB{};
+  std::vector<iplug::sample> mMorphArrayA;
+  std::vector<iplug::sample> mMorphArrayB;
   // Main-knob backup while a chain slot borrows the knobs.
   bool mKnobEditActive = false;
   double mMainKnobBackup[5] = {0.0, 5.0, 5.0, 5.0, 0.0};
