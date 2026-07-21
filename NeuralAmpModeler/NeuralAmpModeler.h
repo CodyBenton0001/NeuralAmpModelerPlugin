@@ -281,6 +281,15 @@ public:
   void BeginChainKnobEdit(int unit);
   void EndChainKnobEdit();
 
+  // --- Rig presets (see NAMRigPresets.h) ----------------------------------
+  // Capture the ENTIRE current rig (main model/IR, global knobs + toggles,
+  // all chain slots with their settings) as JSON / apply one back.
+  nlohmann::json CaptureRigPreset() const;
+  void ApplyRigPreset(const nlohmann::json& j);
+  // Library-relative path of the currently loaded rig preset ("" = none).
+  // Serialized with the project so SAVE knows what to overwrite.
+  WDL_String mRigPresetRel;
+
 private:
   // Allocates mInputPointers and mOutputPointers
   void _AllocateIOPointers(const size_t nChans);
