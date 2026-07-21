@@ -49,6 +49,7 @@ const int kCtrlTagRackView = 1005;
 // 1006 = kCtrlTagTone3000 (NAMTone3000Browser.h)
 const int kCtrlTagChainView = 1007; // NAMChainView.h
 const int kCtrlTagChainBanner = 1008; // (retired - kept so the tag numbering stays stable)
+const int kCtrlTagMorphCards = 1009; // NAMChainView.h (main-view A/B tone cards)
 
 // Window layout: the always-visible tone list on the left and the favorites
 // bar under the main UI. The main plugin UI keeps its stock 600x400 size;
@@ -588,8 +589,8 @@ inline void NotifyNowPlaying(IGraphics* ui, const ToneEntry& entry, const std::s
       }
     }
   }
-  const int tags[] = {
-    kCtrlTagToneSidebar, kCtrlTagFavoritesBar, kCtrlTagToneDetail, kCtrlTagRackView, kCtrlTagChainView};
+  const int tags[] = {kCtrlTagToneSidebar, kCtrlTagFavoritesBar, kCtrlTagToneDetail,
+                      kCtrlTagRackView,    kCtrlTagChainView,    kCtrlTagMorphCards};
   for (int tag : tags)
   {
     if (IControl* pControl = ui->GetControlWithTag(tag))
