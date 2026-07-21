@@ -51,16 +51,11 @@ public:
     const IColor accent = namtheme::Accent();
     g.FillRect(namtheme::BG, mRECT);
 
-    // Header
+    // Header: title + the rig preset bar
     const IRECT header = mRECT.GetFromTop(kChainHeaderHeight);
     const IText titleText(13.0f, namtheme::TEXT_MAIN, "Inter-Bold", EAlign::Near, EVAlign::Middle);
     g.DrawText(titleText, "SIGNAL CHAIN", header.GetReducedFromLeft(16.0f));
-    IRECT tBounds;
-    g.MeasureText(titleText, "SIGNAL CHAIN", tBounds);
-    const IText subText(8.0f, accent, "Inter-Bold", EAlign::Near, EVAlign::Middle);
-    g.DrawText(subText, "IN AT THE TOP - OUT AT THE BOTTOM", header.GetReducedFromLeft(26.0f + tBounds.W()));
-    const IText hintText(8.0f, namtheme::TEXT_FAINT, "Inter-Regular", EAlign::Far, EVAlign::Middle);
-    g.DrawText(hintText, "click a screen to choose a tone", header.GetReducedFromRight(44.0f));
+    DrawPresetBar(g, accent);
 
     // Exit (expand) button
     const IRECT expand = ExpandRect();
@@ -88,6 +83,42 @@ public:
       PLUG()->EndChainKnobEdit();
       Hide(true);
       GetUI()->Resize(PLUG_WIDTH, PLUG_HEIGHT, GetUI()->GetDrawScale());
+      return;
+    }
+    // --- Preset bar ---
+    if (PrevRect().Contains(x, y))
+    {
+      StepPreset(-1);
+      return;
+    }
+    if (NextRect().Contains(x, y))
+    {
+      StepPreset(+1);
+      return;
+    }
+    if (PresetNameRect().Contains(x, y))
+    {
+      OpenPresetMenu();
+      return;
+    }
+    if (SaveRect().Contains(x, y))
+    {
+      SavePreset();
+      return;
+    }
+    if (SaveAsRect().Contains(x, y))
+    {
+      BeginTextEntry(ERigEntry::SaveAs);
+      return;
+    }
+    if (ShareRect().Contains(x, y))
+    {
+      ExportCurrentRig();
+      return;
+    }
+    if (SearchRect().Contains(x, y))
+    {
+      BeginTextEntry(ERigEntry::Search);
       return;
     }
     for (int i = 0; i < kNumUnits; i++)
@@ -131,6 +162,48 @@ public:
     GetUI()->SetAllControlsDirty(); // the SIGNAL CHAIN button becomes BACK TO RACK
   }
 
+  void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
+  {
+    if (pSelectedMenu == nullptr || pSelectedMenu->GetChosenItem() == nullptr)
+      return;
+    const int tag = pSelectedMenu->GetChosenItem()->GetTag();
+    if (tag >= 0 && tag < (int)mRigMenuPaths.size())
+      LoadPresetFile(mRigMenuPaths[tag]);
+  }
+
+  void OnTextEntryCompletion(const char* str, int valIdx) override
+  {
+    const ERigEntry mode = mRigEntryMode;
+    mRigEntryMode = ERigEntry::None;
+    if (str == nullptr || str[0] == '\0')
+      return;
+    if (mode == ERigEntry::SaveAs)
+    {
+      const std::filesystem::path file = namrig::ResolveSavePath(str);
+      if (file.empty())
+      {
+        Flash("Couldn't use that name");
+        return;
+      }
+      try
+      {
+        std::ofstream f(file);
+        f << PLUG()->CaptureRigPreset().dump(2);
+        PLUG()->mRigPresetRel.Set(namrig::RelOfPreset(file).c_str());
+        Flash("Saved");
+      }
+      catch (const std::exception&)
+      {
+        Flash("Couldn't save the preset");
+      }
+      SetDirty(false);
+    }
+    else if (mode == ERigEntry::Search)
+    {
+      OpenSearchMenu(str);
+    }
+  }
+
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
   {
     if (mDragUnit < 0)
@@ -160,6 +233,21 @@ public:
     IControl::OnMouseOver(x, y, mod);
     const bool overExpand = ExpandRect().Contains(x, y);
     int overChoose = -1, overLED = -1, overClear = -1;
+    int barHover = -1;
+    if (PrevRect().Contains(x, y))
+      barHover = 0;
+    else if (NextRect().Contains(x, y))
+      barHover = 1;
+    else if (PresetNameRect().Contains(x, y))
+      barHover = 2;
+    else if (SaveRect().Contains(x, y))
+      barHover = 3;
+    else if (SaveAsRect().Contains(x, y))
+      barHover = 4;
+    else if (ShareRect().Contains(x, y))
+      barHover = 5;
+    else if (SearchRect().Contains(x, y))
+      barHover = 6;
     for (int i = 0; i < kNumUnits; i++)
     {
       if (ChooseRect(i).Contains(x, y))
@@ -170,13 +258,22 @@ public:
         overClear = i;
     }
     if (overExpand != mMouseOverExpand || overChoose != mMouseOverChoose || overLED != mMouseOverLED
-        || overClear != mMouseOverClear)
+        || overClear != mMouseOverClear || barHover != mBarHover)
     {
       mMouseOverExpand = overExpand;
       mMouseOverChoose = overChoose;
       mMouseOverLED = overLED;
       mMouseOverClear = overClear;
-      if (overLED >= 0)
+      mBarHover = barHover;
+      if (barHover == 2)
+        SetTooltip("Rig presets - click to browse");
+      else if (barHover == 4)
+        SetTooltip("Save as new (type Folder/Sub/Name to file it)");
+      else if (barHover == 5)
+        SetTooltip("Export this rig + its tones for a friend");
+      else if (barHover == 6)
+        SetTooltip("Search presets in every folder");
+      else if (overLED >= 0)
         SetTooltip("Bypass this unit");
       else if (overChoose >= 0)
         SetTooltip("Choose a tone from your library");
@@ -195,10 +292,347 @@ public:
     mMouseOverChoose = -1;
     mMouseOverLED = -1;
     mMouseOverClear = -1;
+    mBarHover = -1;
     SetDirty(false);
   }
 
 private:
+  // --- Rig preset bar ------------------------------------------------------
+  enum class ERigEntry
+  {
+    None,
+    SaveAs,
+    Search
+  };
+
+  IRECT BarRow() const
+  {
+    return IRECT(
+      mRECT.L, mRECT.T + kChainHeaderHeight * 0.5f - 11.0f, mRECT.R, mRECT.T + kChainHeaderHeight * 0.5f + 11.0f);
+  }
+  IRECT PrevRect() const
+  {
+    const IRECT r = BarRow();
+    return IRECT(r.L + 140.0f, r.T, r.L + 162.0f, r.B);
+  }
+  IRECT NextRect() const
+  {
+    const IRECT r = BarRow();
+    return IRECT(r.L + 166.0f, r.T, r.L + 188.0f, r.B);
+  }
+  IRECT PresetNameRect() const
+  {
+    const IRECT r = BarRow();
+    return IRECT(r.L + 196.0f, r.T, r.L + 426.0f, r.B);
+  }
+  IRECT SaveRect() const
+  {
+    const IRECT r = BarRow();
+    return IRECT(r.L + 432.0f, r.T, r.L + 478.0f, r.B);
+  }
+  IRECT SaveAsRect() const
+  {
+    const IRECT r = BarRow();
+    return IRECT(r.L + 484.0f, r.T, r.L + 550.0f, r.B);
+  }
+  IRECT ShareRect() const
+  {
+    const IRECT r = BarRow();
+    return IRECT(r.L + 556.0f, r.T, r.L + 580.0f, r.B);
+  }
+  IRECT SearchRect() const
+  {
+    const IRECT r = BarRow();
+    return IRECT(r.L + 586.0f, r.T, r.L + 610.0f, r.B);
+  }
+
+  void DrawPresetBar(IGraphics& g, const IColor& accent)
+  {
+    auto pill = [&](const IRECT& r, bool hover, bool accented) {
+      g.FillRoundRect(IColor(255, 32, 33, 41), r, r.H() * 0.5f);
+      if (hover)
+        g.DrawRoundRect(accent, r, r.H() * 0.5f);
+      else
+        g.DrawRoundRect(IColor(30, 255, 255, 255), r, r.H() * 0.5f);
+      (void)accented;
+    };
+    const IColor dim = namtheme::TEXT_DIM;
+
+    // Prev / next arrows
+    pill(PrevRect(), mBarHover == 0, false);
+    pill(NextRect(), mBarHover == 1, false);
+    {
+      const IRECT p = PrevRect().GetCentredInside(8.0f);
+      g.FillTriangle(mBarHover == 0 ? COLOR_WHITE : dim, p.R, p.T, p.R, p.B, p.L, p.MH());
+      const IRECT n = NextRect().GetCentredInside(8.0f);
+      g.FillTriangle(mBarHover == 1 ? COLOR_WHITE : dim, n.L, n.T, n.L, n.B, n.R, n.MH());
+    }
+
+    // Preset name dropdown
+    const IRECT name = PresetNameRect();
+    pill(name, mBarHover == 2, false);
+    const std::string disp = namrig::PresetDisplayName(PLUG()->mRigPresetRel.Get());
+    const bool none = disp == "No preset";
+    const IText nameText(10.0f, none ? namtheme::TEXT_FAINT : COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    g.DrawText(
+      nameText, tonegallery::Ellipsize(disp, 32).c_str(), name.GetReducedFromLeft(12.0f).GetReducedFromRight(20.0f));
+    // chevron
+    const IRECT ch = name.GetFromRight(20.0f).GetCentredInside(8.0f, 5.0f);
+    g.FillTriangle(mBarHover == 2 ? accent : dim, ch.L, ch.T, ch.R, ch.T, ch.MW(), ch.B);
+
+    // SAVE / SAVE AS
+    pill(SaveRect(), mBarHover == 3, false);
+    pill(SaveAsRect(), mBarHover == 4, false);
+    const IText btnText(8.5f, dim, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    IText saveText = btnText;
+    if (mBarHover == 3)
+      saveText.mFGColor = COLOR_WHITE;
+    g.DrawText(saveText, "SAVE", SaveRect());
+    IText saveAsText = btnText;
+    if (mBarHover == 4)
+      saveAsText.mFGColor = COLOR_WHITE;
+    g.DrawText(saveAsText, "SAVE AS", SaveAsRect());
+
+    // Share (box with an up arrow)
+    {
+      const IRECT r = ShareRect();
+      if (mBarHover == 5)
+        g.FillRoundRect(PluginColors::MOUSEOVER, r, 4.0f);
+      const IColor c = mBarHover == 5 ? COLOR_WHITE : dim;
+      const IRECT box = r.GetCentredInside(12.0f).GetReducedFromTop(3.0f);
+      g.DrawRoundRect(c, box, 1.5f, nullptr, 1.2f);
+      const float mx = r.MW();
+      g.DrawLine(c, mx, box.T - 4.0f, mx, box.T + 3.0f, nullptr, 1.2f);
+      g.DrawLine(c, mx - 3.0f, box.T - 1.0f, mx, box.T - 4.0f, nullptr, 1.2f);
+      g.DrawLine(c, mx + 3.0f, box.T - 1.0f, mx, box.T - 4.0f, nullptr, 1.2f);
+    }
+    // Search (magnifier)
+    {
+      const IRECT r = SearchRect();
+      if (mBarHover == 6)
+        g.FillRoundRect(PluginColors::MOUSEOVER, r, 4.0f);
+      const IColor c = mBarHover == 6 ? COLOR_WHITE : dim;
+      const IRECT m = r.GetCentredInside(12.0f);
+      g.DrawEllipse(c, m.GetFromTLHC(8.0f, 8.0f), nullptr, 1.4f);
+      g.DrawLine(c, m.L + 7.0f, m.T + 7.0f, m.R, m.B, nullptr, 1.4f);
+    }
+
+    // Status flash
+    if (mRigStatusFrames > 0)
+    {
+      const IText statusText(8.5f, accent, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+      g.DrawText(
+        statusText, mRigStatus.c_str(), IRECT(SearchRect().R + 10.0f, BarRow().T, ExpandRect().L - 6.0f, BarRow().B));
+      mRigStatusFrames--;
+      SetDirty(false);
+    }
+  }
+
+  void Flash(const std::string& msg)
+  {
+    mRigStatus = msg;
+    mRigStatusFrames = 120;
+    SetDirty(false);
+  }
+
+  void BuildMenuRec(IPopupMenu* pMenu, const std::filesystem::path& dir)
+  {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> dirs, files;
+    try
+    {
+      for (const auto& it : fs::directory_iterator(dir))
+      {
+        if (it.is_directory())
+          dirs.push_back(it.path());
+        else if (tonegallery::HasExtension(it.path(), ".namrig"))
+          files.push_back(it.path());
+      }
+    }
+    catch (const std::exception&)
+    {
+    }
+    std::sort(dirs.begin(), dirs.end());
+    std::sort(files.begin(), files.end());
+    for (const auto& d : dirs)
+    {
+      IPopupMenu* pSub = new IPopupMenu();
+      BuildMenuRec(pSub, d);
+      const std::string label = tonegallery::PathToUTF8(d.filename());
+      if (pSub->NItems() == 0)
+      {
+        delete pSub;
+        pMenu->AddItem(new IPopupMenu::Item((label + "  (empty)").c_str(), IPopupMenu::Item::kDisabled));
+      }
+      else
+        pMenu->AddItem(new IPopupMenu::Item(label.c_str(), pSub));
+    }
+    for (const auto& f : files)
+    {
+      const int tag = (int)mRigMenuPaths.size();
+      mRigMenuPaths.push_back(tonegallery::PathToUTF8(f));
+      pMenu->AddItem(new IPopupMenu::Item(tonegallery::PathToUTF8(f.stem()).c_str(), IPopupMenu::Item::kNoFlags, tag));
+    }
+  }
+
+  void OpenPresetMenu()
+  {
+    namrig::EnsurePresetsRoot();
+    mRigMenu.Clear();
+    mRigMenuPaths.clear();
+    BuildMenuRec(&mRigMenu, namrig::PresetsRoot());
+    if (mRigMenu.NItems() == 0)
+      mRigMenu.AddItem(new IPopupMenu::Item("(no rigs saved yet - use SAVE AS)", IPopupMenu::Item::kDisabled));
+    GetUI()->CreatePopupMenu(*this, mRigMenu, PresetNameRect());
+  }
+
+  void OpenSearchMenu(const char* query)
+  {
+    namespace fs = std::filesystem;
+    std::string q = query;
+    std::transform(q.begin(), q.end(), q.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+    mRigMenu.Clear();
+    mRigMenuPaths.clear();
+    try
+    {
+      std::vector<fs::path> hits;
+      for (const auto& it : fs::recursive_directory_iterator(namrig::PresetsRoot()))
+      {
+        if (!it.is_regular_file() || !tonegallery::HasExtension(it.path(), ".namrig"))
+          continue;
+        std::string stem = tonegallery::PathToUTF8(it.path().stem());
+        std::transform(stem.begin(), stem.end(), stem.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+        if (stem.find(q) != std::string::npos)
+          hits.push_back(it.path());
+      }
+      std::sort(hits.begin(), hits.end());
+      for (const auto& f : hits)
+      {
+        const int tag = (int)mRigMenuPaths.size();
+        mRigMenuPaths.push_back(tonegallery::PathToUTF8(f));
+        std::string label = tonegallery::PathToUTF8(f.stem());
+        const std::string folder = tonegallery::PathToUTF8(f.parent_path().lexically_relative(namrig::PresetsRoot()));
+        if (!folder.empty() && folder != ".")
+          label += "   (" + folder + ")";
+        mRigMenu.AddItem(new IPopupMenu::Item(label.c_str(), IPopupMenu::Item::kNoFlags, tag));
+      }
+    }
+    catch (const std::exception&)
+    {
+    }
+    if (mRigMenu.NItems() == 0)
+      mRigMenu.AddItem(new IPopupMenu::Item("(no matches)", IPopupMenu::Item::kDisabled));
+    GetUI()->CreatePopupMenu(*this, mRigMenu, PresetNameRect());
+  }
+
+  void LoadPresetFile(const std::string& absPath)
+  {
+    try
+    {
+      std::ifstream f(tonegallery::UTF8ToPath(absPath));
+      nlohmann::json j = nlohmann::json::parse(f, nullptr, true, true);
+      PLUG()->ApplyRigPreset(j);
+      PLUG()->mRigPresetRel.Set(namrig::RelOfPreset(tonegallery::UTF8ToPath(absPath)).c_str());
+      for (int i = 0; i < 3; i++)
+      {
+        mSlotCacheKey[i].clear();
+        mSlotCacheValid[i] = false;
+      }
+      Flash("Loaded");
+      GetUI()->SetAllControlsDirty();
+    }
+    catch (const std::exception&)
+    {
+      Flash("Couldn't load that preset");
+    }
+  }
+
+  void StepPreset(int delta)
+  {
+    namespace fs = std::filesystem;
+    try
+    {
+      namrig::EnsurePresetsRoot();
+      // Step within the current preset's folder (or the root if none).
+      fs::path dir = namrig::PresetsRoot();
+      std::string currentFile;
+      if (PLUG()->mRigPresetRel.GetLength())
+      {
+        const fs::path cur = namrig::PresetsRoot() / tonegallery::UTF8ToPath(PLUG()->mRigPresetRel.Get());
+        dir = cur.parent_path();
+        currentFile = tonegallery::PathToUTF8(cur.filename());
+      }
+      std::vector<fs::path> files;
+      for (const auto& it : fs::directory_iterator(dir))
+        if (it.is_regular_file() && tonegallery::HasExtension(it.path(), ".namrig"))
+          files.push_back(it.path());
+      std::sort(files.begin(), files.end());
+      if (files.empty())
+      {
+        Flash("No presets here yet");
+        return;
+      }
+      int idx = 0;
+      for (int i = 0; i < (int)files.size(); i++)
+        if (tonegallery::PathToUTF8(files[i].filename()) == currentFile)
+        {
+          idx = i + delta;
+          break;
+        }
+      idx = ((idx % (int)files.size()) + (int)files.size()) % (int)files.size();
+      LoadPresetFile(tonegallery::PathToUTF8(files[idx]));
+    }
+    catch (const std::exception&)
+    {
+      Flash("Couldn't switch preset");
+    }
+  }
+
+  void SavePreset()
+  {
+    if (!PLUG()->mRigPresetRel.GetLength())
+    {
+      BeginTextEntry(ERigEntry::SaveAs);
+      return;
+    }
+    try
+    {
+      const std::filesystem::path file = namrig::PresetsRoot() / tonegallery::UTF8ToPath(PLUG()->mRigPresetRel.Get());
+      std::filesystem::create_directories(file.parent_path());
+      std::ofstream f(file);
+      f << PLUG()->CaptureRigPreset().dump(2);
+      Flash("Saved");
+    }
+    catch (const std::exception&)
+    {
+      Flash("Couldn't save");
+    }
+  }
+
+  void BeginTextEntry(ERigEntry mode)
+  {
+    mRigEntryMode = mode;
+    const IText entryText(11.0f, COLOR_WHITE, "Inter-Regular", EAlign::Near, EVAlign::Middle);
+    const char* seed = "";
+    std::string cur;
+    if (mode == ERigEntry::SaveAs && PLUG()->mRigPresetRel.GetLength())
+    {
+      cur = namrig::PresetDisplayName(PLUG()->mRigPresetRel.Get());
+      seed = cur.c_str();
+    }
+    GetUI()->CreateTextEntry(*this, entryText, PresetNameRect(), seed);
+  }
+
+  void ExportCurrentRig()
+  {
+    std::string name = namrig::PresetDisplayName(PLUG()->mRigPresetRel.Get());
+    if (name == "No preset")
+      name = "My Rig";
+    std::string msg;
+    namrig::ExportRigBundle(PLUG()->CaptureRigPreset(), name, msg);
+    Flash(msg);
+  }
+
   // --- Geometry ------------------------------------------------------------
   IRECT UnitRect(int i) const
   {
@@ -573,6 +1007,13 @@ private:
   bool mSlotCacheValid[3] = {false, false, false};
   std::map<std::string, IBitmap> mImageCache;
   int mDragUnit = -1;
+  // Rig preset bar state
+  ERigEntry mRigEntryMode = ERigEntry::None;
+  IPopupMenu mRigMenu;
+  std::vector<std::string> mRigMenuPaths;
+  std::string mRigStatus;
+  int mRigStatusFrames = 0;
+  int mBarHover = -1; // 0 prev, 1 next, 2 name, 3 save, 4 save-as, 5 share, 6 search
   bool mMouseOverExpand = false;
   int mMouseOverChoose = -1;
   int mMouseOverLED = -1;
