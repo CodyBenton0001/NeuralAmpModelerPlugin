@@ -163,11 +163,8 @@ public:
                                            : "BASS CENTER: keep the low end mono/centered while the highs spread");
   }
 
-  bool On() const
-  {
-    return mWhich == kToggleDoubleTrack ? PLUG()->IsDoubleTrackActive() : PLUG()->IsDoubleTrackBassCenter();
-  }
-  bool Enabled() const { return mWhich == kToggleDoubleTrack ? true : PLUG()->IsDoubleTrackActive(); }
+  bool On() { return mWhich == kToggleDoubleTrack ? PLUG()->IsDoubleTrackActive() : PLUG()->IsDoubleTrackBassCenter(); }
+  bool Enabled() { return mWhich == kToggleDoubleTrack ? true : PLUG()->IsDoubleTrackActive(); }
 
   void Draw(IGraphics& g) override
   {
