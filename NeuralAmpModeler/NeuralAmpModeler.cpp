@@ -186,6 +186,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto ngToggleArea =
       noiseGateArea.GetVShifted(noiseGateArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
     const auto eqToggleArea = midKnobArea.GetVShifted(midKnobArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
+    // Instant Double-Track toggles sit below the knob row on the right, in the
+    // same band as the gate/EQ toggles (spanning the treble..morph columns).
+    const auto dtToggleBand = trebleKnobArea.Union(morphKnobArea)
+                                .GetVShifted(trebleKnobArea.H())
+                                .SubRectVertical(2, 0)
+                                .GetReducedFromTop(10.0f);
+    const auto doubleTrackSwitchArea = dtToggleBand.GetGridCell(0, 0, 1, 2);
+    const auto bassCenterSwitchArea = dtToggleBand.GetGridCell(0, 1, 1, 2);
 
     // Areas for model and IR
     const auto fileWidth = 200.0f;
@@ -416,6 +424,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Tone Morph: the MORPH knob (top row) + the A TONE / B TONE cards.
     pGraphics->AttachControl(new NAMMorphKnobControl(morphKnobArea));
     pGraphics->AttachControl(new NAMMorphCardsControl(morphCardsArea), kCtrlTagMorphCards);
+    pGraphics->AttachControl(
+      new NAMDoubleTrackSwitch(doubleTrackSwitchArea, NAMDoubleTrackSwitch::kToggleDoubleTrack, "DOUBLE TRACK"));
+    pGraphics->AttachControl(
+      new NAMDoubleTrackSwitch(bassCenterSwitchArea, NAMDoubleTrackSwitch::kToggleBassCenter, "BASS CENTER"));
 
     // The meters
     pGraphics->AttachControl(new ThemedMeterControl(inputMeterArea, style), kCtrlTagInputMeter);
@@ -761,13 +773,30 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** hpfPointers = mHighPass.Process(irPointers, numChannelsInternal, numFrames);
   // sample** lpfPointers = mLowPass.Process(hpfPointers, numChannelsInternal, numFrames);
 
-  // restore previous floating point state
-  std::feupdateenv(&fe_state);
-
   // Let's get outta here
   // This is where we exit mono for whatever the output requires.
-  _ProcessOutput(hpfPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+  // Tone Gallery fork: the instant double-track is the very last step -- it
+  // takes this finished mono tone and spreads it into two hard-panned takes.
+  // Runs before the FP state is restored so its one-pole low-pass (bass-center)
+  // stays denormal-protected.
+  if (mDoubleTrackActive.load() && numChannelsExternalOut >= 2)
+  {
+    if (mDTOutL.size() < numFrames)
+      mDTOutL.resize(numFrames, 0.0);
+    if (mDTOutR.size() < numFrames)
+      mDTOutR.resize(numFrames, 0.0);
+    _RenderDoubleTrack(hpfPointers[0], numFrames, sampleRate, mDTOutL.data(), mDTOutR.data());
+    _ProcessOutputStereo(mDTOutL.data(), mDTOutR.data(), outputs, numFrames, numChannelsExternalOut);
+  }
+  else
+  {
+    mDTActivePrev = false;
+    _ProcessOutput(hpfPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+  }
   // _ProcessOutput(lpfPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+
+  // restore previous floating point state
+  std::feupdateenv(&fe_state);
   // * Output of input leveling (inputs -> mInputPointers),
   // * Output of output leveling (mOutputPointers -> outputs)
   _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
@@ -799,6 +828,18 @@ void NeuralAmpModeler::OnReset()
       mChainToneStacks[ci]->SetParam("middle", mChainSlots[ci].middle.load());
       mChainToneStacks[ci]->SetParam("treble", mChainSlots[ci].treble.load());
     }
+  }
+  // Instant double-track delay line (sized for up to ~60 ms of history).
+  {
+    int dtLen = (int)(0.06 * sampleRate) + 8;
+    if (dtLen < 64)
+      dtLen = 64;
+    mDTBuf.assign((size_t)dtLen, 0.0);
+    mDTWritePos = 0;
+    mDTPhaseL = 0.0;
+    mDTPhaseR = 1.7;
+    mDTLowState = 0.0;
+    mDTActivePrev = false;
   }
   _UpdateLatency();
 }
@@ -851,7 +892,7 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
   // Tone Gallery fork: append the signal-chain block. Old versions of the
   // plugin simply never read this far, so this stays backwards-compatible.
-  chunk.PutStr("###NAMChainV4###");
+  chunk.PutStr("###NAMChainV5###");
   int mainEnabled = mChainMainEnabled.load() ? 1 : 0;
   double mainLevel = mChainMainLevelDB.load();
   int chainMode = mToneChainMode ? 1 : 0;
@@ -892,6 +933,11 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
   chunk.PutStr(mMainToneBPath.Get());
   double mainMorph = mChainMainMorph.load();
   chunk.Put(&mainMorph);
+  // V5: instant double-track state (final output stage)
+  int dtActive = mDoubleTrackActive.load() ? 1 : 0;
+  int dtBassCenter = mDoubleTrackBassCenter.load() ? 1 : 0;
+  chunk.Put(&dtActive);
+  chunk.Put(&dtBassCenter);
   return ok;
 }
 
@@ -909,6 +955,9 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
   mMainToneBPath.Set("");
   mShouldRemoveModelB = true;
   mShouldRemoveIRB = true;
+  // Instant double-track defaults (off for projects saved before it existed)
+  mDoubleTrackActive = false;
+  mDoubleTrackBassCenter = false;
   for (int ci = 0; ci < kNumChainSlots; ci++)
   {
     ChainSlot& slot = mChainSlots[ci];
@@ -938,7 +987,8 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
   const bool isV2 = pos > startPos && strcmp(marker.Get(), "###NAMChainV2###") == 0;
   const bool isV3 = pos > startPos && strcmp(marker.Get(), "###NAMChainV3###") == 0;
   const bool isV4 = pos > startPos && strcmp(marker.Get(), "###NAMChainV4###") == 0;
-  if (!isV1 && !isV2 && !isV3 && !isV4)
+  const bool isV5 = pos > startPos && strcmp(marker.Get(), "###NAMChainV5###") == 0;
+  if (!isV1 && !isV2 && !isV3 && !isV4 && !isV5)
     return startPos; // no chain block in this save
 
   int mainEnabled = 1, chainMode = 0;
@@ -978,7 +1028,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     if (pos < 0)
       return startPos;
     double inputDB = 0.0, bass = 5.0, middle = 5.0, treble = 5.0;
-    if (isV2 || isV3 || isV4)
+    if (isV2 || isV3 || isV4 || isV5)
     {
       pos = chunk.Get(&inputDB, pos);
       if (pos < 0)
@@ -996,7 +1046,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     // V4: this slot's Tone Morph B tone + morph amount
     WDL_String modelBPath, irBPath, toneBPath;
     double morph = 0.0;
-    if (isV4)
+    if (isV4 || isV5)
     {
       pos = chunk.GetStr(modelBPath, pos);
       if (pos < 0)
@@ -1025,11 +1075,11 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
       mChainToneStacks[ci]->SetParam("treble", treble);
     }
     SetChainTone(ci, modelPath.Get(), irPath.Get(), tonePath.Get());
-    if (isV4)
+    if (isV4 || isV5)
       StageUnitBTone(ci + 1, modelBPath.Get(), irBPath.Get(), toneBPath.Get());
   }
   // V3: the loaded rig preset path
-  if (isV3 || isV4)
+  if (isV3 || isV4 || isV5)
   {
     WDL_String rigRel;
     const int p2 = chunk.GetStr(rigRel, pos);
@@ -1040,7 +1090,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     }
   }
   // V4: the main unit's Tone Morph B tone + morph amount
-  if (isV4)
+  if (isV4 || isV5)
   {
     WDL_String namB, irB, toneB;
     double mainMorph = 0.0;
@@ -1065,6 +1115,23 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
       pos = p3;
       mChainMainMorph = mainMorph;
       StageUnitBTone(0, namB.Get(), irB.Get(), toneB.Get());
+    }
+  }
+  // V5: instant double-track state (final output stage)
+  if (isV5)
+  {
+    int dtActive = 0, dtBassCenter = 0;
+    int p4 = chunk.Get(&dtActive, pos);
+    if (p4 > 0)
+    {
+      pos = p4;
+      p4 = chunk.Get(&dtBassCenter, pos);
+    }
+    if (p4 > 0)
+    {
+      pos = p4;
+      mDoubleTrackActive = dtActive != 0;
+      mDoubleTrackBassCenter = dtBassCenter != 0;
     }
   }
   return pos;
@@ -2045,6 +2112,8 @@ nlohmann::json NeuralAmpModeler::CaptureRigPreset() const
     p["gate_on"] = GetParam(kNoiseGateActive)->Bool();
     p["eq_on"] = GetParam(kEQActive)->Bool();
     p["ir_on"] = GetParam(kIRToggle)->Bool();
+    p["double_track_on"] = mDoubleTrackActive.load();
+    p["double_track_bass_center"] = mDoubleTrackBassCenter.load();
     j["params"] = p;
   }
 
@@ -2160,6 +2229,9 @@ void NeuralAmpModeler::ApplyRigPreset(const nlohmann::json& j)
       setToggle(kNoiseGateActive, "gate_on", true);
       setToggle(kEQActive, "eq_on", true);
       setToggle(kIRToggle, "ir_on", true);
+      // Instant double-track (fork state, not a base param)
+      mDoubleTrackActive = p.value("double_track_on", false);
+      mDoubleTrackBassCenter = p.value("double_track_bass_center", false);
     }
 
     // The extra chain slots
@@ -2429,6 +2501,101 @@ void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** ou
       // values.
       outputs[cout][s] = gain * inputs[cin][s];
 #endif
+}
+
+// Fractional read from the double-track history buffer, `delaySamples` behind
+// the write head, with linear interpolation and wrap-around.
+iplug::sample NeuralAmpModeler::_DTReadTap(int writePos, double delaySamples, int len) const
+{
+  double rp = (double)writePos - delaySamples;
+  while (rp < 0.0)
+    rp += (double)len;
+  while (rp >= (double)len)
+    rp -= (double)len;
+  const int i0 = (int)rp;
+  const int i1 = (i0 + 1) % len;
+  const double frac = rp - (double)i0;
+  return mDTBuf[i0] * (1.0 - frac) + mDTBuf[i1] * frac;
+}
+
+// Instant double-track. One mono history buffer read by two slowly-modulated
+// taps (different base delays + LFO rates) makes two decorrelated, micro-detuned
+// "takes" that pan hard left/right. With bass-center on, the lows stay mono and
+// only the highs are spread, so the low end stays tight.
+void NeuralAmpModeler::_RenderDoubleTrack(iplug::sample* mono, const size_t nFrames, const double sampleRate,
+                                          iplug::sample* outL, iplug::sample* outR)
+{
+  const int len = (int)mDTBuf.size();
+  if (len < 8 || sampleRate <= 0.0)
+  {
+    for (size_t s = 0; s < nFrames; s++)
+    {
+      outL[s] = mono[s];
+      outR[s] = mono[s];
+    }
+    return;
+  }
+  const bool bassCenter = mDoubleTrackBassCenter.load();
+  const double twoPi = 6.283185307179586;
+  const double baseL = 0.011 * sampleRate; // 11 ms
+  const double baseR = 0.018 * sampleRate; // 18 ms
+  const double depth = 0.0025 * sampleRate; // +/- 2.5 ms slow drift -> micro-detune
+  const double incL = twoPi * 0.13 / sampleRate;
+  const double incR = twoPi * 0.19 / sampleRate;
+  const double lpCoef = std::exp(-twoPi * 160.0 / sampleRate); // ~160 Hz low/high split
+  // Rising edge: clear stale history so switching on doesn't burst.
+  if (!mDTActivePrev)
+  {
+    std::fill(mDTBuf.begin(), mDTBuf.end(), 0.0);
+    mDTWritePos = 0;
+    mDTPhaseL = 0.0;
+    mDTPhaseR = 1.7;
+    mDTLowState = 0.0;
+  }
+  mDTActivePrev = true;
+  for (size_t s = 0; s < nFrames; s++)
+  {
+    const double x = mono[s];
+    double low = 0.0, fed = x;
+    if (bassCenter)
+    {
+      mDTLowState = lpCoef * mDTLowState + (1.0 - lpCoef) * x;
+      low = mDTLowState;
+      fed = x - low; // only the highs get spread
+    }
+    mDTBuf[mDTWritePos] = fed;
+    const double dL = baseL + depth * std::sin(mDTPhaseL);
+    const double dR = baseR + depth * std::sin(mDTPhaseR);
+    const double vL = _DTReadTap(mDTWritePos, dL, len);
+    const double vR = _DTReadTap(mDTWritePos, dR, len);
+    outL[s] = bassCenter ? (low + vL) : vL;
+    outR[s] = bassCenter ? (low + vR) : vR;
+    mDTPhaseL += incL;
+    if (mDTPhaseL > twoPi)
+      mDTPhaseL -= twoPi;
+    mDTPhaseR += incR;
+    if (mDTPhaseR > twoPi)
+      mDTPhaseR -= twoPi;
+    mDTWritePos = (mDTWritePos + 1) % len;
+  }
+}
+
+// Write the two double-track voices out (even channels = left, odd = right),
+// applying output gain and the same clamp as the mono path.
+void NeuralAmpModeler::_ProcessOutputStereo(iplug::sample* left, iplug::sample* right, iplug::sample** outputs,
+                                            const size_t nFrames, const size_t nChansOut)
+{
+  const double gain = mOutputGain;
+  for (size_t c = 0; c < nChansOut; c++)
+  {
+    const iplug::sample* src = (c % 2 == 0) ? left : right;
+    for (size_t s = 0; s < nFrames; s++)
+#ifdef APP_API // Ensure valid output to interface
+      outputs[c][s] = std::clamp(gain * src[s], -1.0, 1.0);
+#else // In a DAW, downstream can handle large values.
+      outputs[c][s] = gain * src[s];
+#endif
+  }
 }
 
 void NeuralAmpModeler::_UpdateControlsFromModel()
