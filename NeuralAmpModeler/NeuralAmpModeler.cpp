@@ -183,17 +183,23 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto outputKnobArea = knobsArea.GetGridCell(0, kOutputLevel, 1, kKnobCols).GetPadded(-singleKnobPad);
     const auto morphKnobArea = knobsArea.GetGridCell(0, numKnobs, 1, kKnobCols).GetPadded(-singleKnobPad);
 
-    const auto ngToggleArea =
-      noiseGateArea.GetVShifted(noiseGateArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
-    const auto eqToggleArea = midKnobArea.GetVShifted(midKnobArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
-    // Instant Double-Track toggles sit below the knob row on the right, in the
-    // same band as the gate/EQ toggles (spanning the treble..morph columns).
-    const auto dtToggleBand = trebleKnobArea.Union(morphKnobArea)
-                                .GetVShifted(trebleKnobArea.H())
-                                .SubRectVertical(2, 0)
-                                .GetReducedFromTop(10.0f);
-    const auto doubleTrackSwitchArea = dtToggleBand.GetGridCell(0, 0, 1, 2);
-    const auto bassCenterSwitchArea = dtToggleBand.GetGridCell(0, 1, 1, 2);
+    // Toggle bar: one rounded strip below the knob panel holding all four
+    // switches -- NOISE GATE + EQ on the left, a gap, then DOUBLE TRACK + BASS
+    // CENTER on the right (labels centered under each switch).
+    const auto toggleBar =
+      IRECT(contentArea.MW() - 220.0f, knobsArea.B + 15.0f, contentArea.MW() + 220.0f, knobsArea.B + 57.0f);
+    const auto toggleBarInner = toggleBar.GetPadded(-5.0f);
+    const float kGroupGap = 20.0f;
+    const float kLeftGroupW = (toggleBarInner.W() - kGroupGap) * 0.46f;
+    const float kRightGroupW = (toggleBarInner.W() - kGroupGap) * 0.54f;
+    const auto leftToggleGroup =
+      IRECT(toggleBarInner.L, toggleBarInner.T, toggleBarInner.L + kLeftGroupW, toggleBarInner.B);
+    const auto rightToggleGroup =
+      IRECT(toggleBarInner.R - kRightGroupW, toggleBarInner.T, toggleBarInner.R, toggleBarInner.B);
+    const auto ngToggleArea = leftToggleGroup.GetGridCell(0, 0, 1, 2);
+    const auto eqToggleArea = leftToggleGroup.GetGridCell(0, 1, 1, 2);
+    const auto doubleTrackSwitchArea = rightToggleGroup.GetGridCell(0, 0, 1, 2);
+    const auto bassCenterSwitchArea = rightToggleGroup.GetGridCell(0, 1, 1, 2);
 
     // Areas for model and IR
     const auto fileWidth = 200.0f;
@@ -359,6 +365,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachPanelBackground(namtheme::BG);
     pGraphics->AttachControl(
       new ThemedCardControl(knobsArea.GetHPadded(4.0f).GetVPadded(12.0f), namtheme::PANEL2, 12.0f, namtheme::LINE));
+    // The toggle bar's rounded background (behind the four switches).
+    pGraphics->AttachControl(new ThemedCardControl(toggleBar, namtheme::PANEL2, 10.0f, namtheme::LINE));
     // Title, centered between the TONE3000 and SIGNAL CHAIN buttons.
     pGraphics->AttachControl(
       new ThemedTitleControl(IRECT(t3kButtonArea.R + 8.0f, titleArea.T, chainButtonArea.L - 8.0f, titleArea.B)));
