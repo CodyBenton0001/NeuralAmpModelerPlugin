@@ -171,17 +171,18 @@ public:
     const IColor accent = namtheme::Accent();
     const bool on = On();
     const bool enabled = Enabled();
-    const IRECT pill = mRECT.GetFromTop(17.0f).GetCentredInside(34.0f, 16.0f);
-    const IColor offCol = IColor(26, 255, 255, 255);
-    g.FillRoundRect(on && enabled ? accent : offCol, pill, pill.H() * 0.5f);
+    // Pill + handle drawn to match ThemedSwitchControl; label centered below.
+    const IRECT widget = mRECT.GetReducedFromBottom(13.0f);
+    const IRECT pill = widget.GetCentredInside(34.0f, 17.0f);
+    g.FillRoundRect(on && enabled ? accent : IColor(26, 255, 255, 255), pill, pill.H() * 0.5f);
     if (mHover && enabled)
       g.FillRoundRect(PluginColors::MOUSEOVER, pill, pill.H() * 0.5f);
-    const float hr = 5.5f;
+    const float hr = 6.0f;
     const float hx = on ? pill.R - 2.5f - hr : pill.L + 2.5f + hr;
     g.FillCircle(on && enabled ? COLOR_WHITE : IColor(255, 130, 130, 138), hx, pill.MH(), hr);
-    const IColor txt = enabled ? (on ? accent : namtheme::TEXT_DIM) : namtheme::TEXT_FAINT;
-    const IText label(8.0f, txt, namtheme::kFontBold, EAlign::Center, EVAlign::Middle);
-    g.DrawText(label, mLabel.c_str(), IRECT(mRECT.L, pill.B + 1.0f, mRECT.R, mRECT.B));
+    const IColor txt = PluginColors::NAM_THEMEFONTCOLOR.WithOpacity(enabled ? 0.65f : 0.3f);
+    const IText label(11.0f, txt, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    g.DrawText(label, mLabel.c_str(), mRECT.GetFromBottom(13.0f));
   }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
