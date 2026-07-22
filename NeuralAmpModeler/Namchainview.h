@@ -141,6 +141,89 @@ private:
   bool mHover = false;
 };
 
+// A compact slide-switch toggle for the main view that flips a plugin flag:
+// the Instant Double-Track and its Bass-Center option. Styled to match
+// ThemedSwitchControl (pill + handle + small label). Reads/writes plugin state
+// directly (these are fork atomics, not automatable params).
+class NAMDoubleTrackSwitch : public IControl
+{
+public:
+  enum EWhich
+  {
+    kToggleDoubleTrack,
+    kToggleBassCenter
+  };
+
+  NAMDoubleTrackSwitch(const IRECT& bounds, EWhich which, const char* label)
+  : IControl(bounds)
+  , mWhich(which)
+  , mLabel(label)
+  {
+    SetTooltip(which == kToggleDoubleTrack ? "DOUBLE TRACK: spread the final tone into two hard-panned takes (L/R)"
+                                           : "BASS CENTER: keep the low end mono/centered while the highs spread");
+  }
+
+  bool On() const
+  {
+    return mWhich == kToggleDoubleTrack ? PLUG()->IsDoubleTrackActive() : PLUG()->IsDoubleTrackBassCenter();
+  }
+  bool Enabled() const { return mWhich == kToggleDoubleTrack ? true : PLUG()->IsDoubleTrackActive(); }
+
+  void Draw(IGraphics& g) override
+  {
+    const IColor accent = namtheme::Accent();
+    const bool on = On();
+    const bool enabled = Enabled();
+    const IRECT pill = mRECT.GetFromTop(17.0f).GetCentredInside(34.0f, 16.0f);
+    const IColor offCol = IColor(26, 255, 255, 255);
+    g.FillRoundRect(on && enabled ? accent : offCol, pill, pill.H() * 0.5f);
+    if (mHover && enabled)
+      g.FillRoundRect(PluginColors::MOUSEOVER, pill, pill.H() * 0.5f);
+    const float hr = 5.5f;
+    const float hx = on ? pill.R - 2.5f - hr : pill.L + 2.5f + hr;
+    g.FillCircle(on && enabled ? COLOR_WHITE : IColor(255, 130, 130, 138), hx, pill.MH(), hr);
+    const IColor txt = enabled ? (on ? accent : namtheme::TEXT_DIM) : namtheme::TEXT_FAINT;
+    const IText label(8.0f, txt, namtheme::kFontBold, EAlign::Center, EVAlign::Middle);
+    g.DrawText(label, mLabel.c_str(), IRECT(mRECT.L, pill.B + 1.0f, mRECT.R, mRECT.B));
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (mWhich == kToggleDoubleTrack)
+      PLUG()->ToggleDoubleTrack();
+    else
+    {
+      if (!PLUG()->IsDoubleTrackActive())
+        return; // bass-center only matters while double-track is on
+      PLUG()->ToggleDoubleTrackBassCenter();
+    }
+    if (GetUI())
+      GetUI()->SetAllControlsDirty();
+  }
+
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override
+  {
+    if (!mHover)
+    {
+      mHover = true;
+      SetDirty(false);
+    }
+  }
+  void OnMouseOut() override
+  {
+    if (mHover)
+    {
+      mHover = false;
+      SetDirty(false);
+    }
+  }
+
+private:
+  EWhich mWhich;
+  std::string mLabel;
+  bool mHover = false;
+};
+
 // The A TONE / B TONE card pair for the main view.
 class NAMMorphCardsControl : public IControl, public tonegallery::INowPlayingListener
 {
