@@ -1188,7 +1188,8 @@ class NAMToneDetailControl : public IControl, public tonegallery::INowPlayingLis
 {
 public:
   static constexpr float kPhotoHeight = 130.0f;
-  static constexpr float kRowHeight = 24.0f;
+  static constexpr float kRowH1 = 24.0f; // single-line variant row
+  static constexpr float kRowH2 = 36.0f; // wrapped (two-line) variant row
 
   NAMToneDetailControl(const IRECT& bounds, IFileDialogCompletionHandlerFunc loadModelFunc,
                        IFileDialogCompletionHandlerFunc loadIRFunc)
@@ -1203,6 +1204,10 @@ public:
     mEntry = entry;
     mHasEntry = true;
     mScroll = 0.0f;
+    mDescExpanded = false;
+    mSeeAllRect = IRECT();
+    mMouseOverSeeAll = false;
+    BuildRows();
     Hide(false);
     SetDirty(false);
   }
@@ -1316,24 +1321,45 @@ public:
     g.DrawText(loadText, "LOAD TONE", mLoadButtonRect);
     y += 32.0f;
 
-    // Description + variants share one scrolling region, so the FULL
-    // description shows without ever squeezing the variant list.
+    // Description + variants share one scrolling region. The description is
+    // collapsed by default (with a See all toggle) and variant names wrap to
+    // two lines, so nothing gets clipped while the list stays scrollable.
     const float scrollTop = y;
     mScrollTop = scrollTop;
     const IRECT scrollRegion(mRECT.L, scrollTop, mRECT.R, mRECT.B - 8.0f);
     g.PathClipRegion(scrollRegion);
     float sy = scrollTop - mScroll;
 
-    // Description (full text, wrapped)
+    // Description — collapsed to a few lines by default, with a "See all"
+    // toggle that expands to the full text (and "See less" to collapse again).
+    mSeeAllRect = IRECT();
     if (!mEntry.description.empty())
     {
+      const std::vector<std::string> descLines = tonegallery::WrapLines(mEntry.description, 40, 200);
+      const int kCollapsedLines = 4;
+      const bool expandable = (int)descLines.size() > kCollapsedLines;
+      const int shown = (!mDescExpanded && expandable) ? kCollapsedLines : (int)descLines.size();
       const IText descText(9.0f, IColor(255, 150, 153, 162), "Inter-Regular", EAlign::Near, EVAlign::Top);
-      for (const auto& line : tonegallery::WrapLines(mEntry.description, 40, 200))
+      for (int li = 0; li < shown; li++)
       {
-        g.DrawText(descText, line.c_str(), IRECT(body.L, sy, body.R, sy + 11.0f));
+        g.DrawText(descText, descLines[li].c_str(), IRECT(body.L, sy, body.R, sy + 11.0f));
         sy += 11.5f;
       }
-      sy += 8.0f;
+      if (expandable)
+      {
+        sy += 3.0f;
+        const char* seeLabel = mDescExpanded ? "See less" : "See all";
+        const float lw = 14.0f + 5.4f * (float)strlen(seeLabel);
+        mSeeAllRect = IRECT(body.L, sy, body.L + lw, sy + 15.0f);
+        g.FillRoundRect(accent.WithOpacity(mMouseOverSeeAll ? 0.30f : 0.16f), mSeeAllRect, 4.0f);
+        const IText seeText(8.5f, accent, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+        g.DrawText(seeText, seeLabel, mSeeAllRect);
+        sy += 19.0f;
+      }
+      else
+      {
+        sy += 8.0f;
+      }
     }
 
     // Variants header
@@ -1344,7 +1370,10 @@ public:
     g.DrawText(headerText, header.str().c_str(), IRECT(body.L, sy, body.R, sy + 12.0f));
     sy += 16.0f;
 
-    // Variant rows (RowRect uses mListTop, which is already the scrolled top)
+    // Variant rows (RowRect uses mListTop, which is already the scrolled top).
+    // Row geometry/wrapping is precomputed in BuildRows(); rebuild if stale.
+    if ((int)mRowLines.size() != numVariants)
+      BuildRows();
     mListTop = sy;
     for (int i = 0; i < numVariants; i++)
     {
@@ -1362,12 +1391,18 @@ public:
       g.FillRoundRect(typeColor.WithOpacity(0.2f), typeChip, 3.0f);
       const IText typeText(7.0f, typeColor, "Inter-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(typeText, isIR ? "IR" : "M", typeChip);
-      // Full variant name (filename without extension)
-      const std::string stem = tonegallery::PathToUTF8(tonegallery::UTF8ToPath(path).stem());
+      // Variant name — wraps onto a second line when too long instead of clipping.
+      const IRECT textArea = row.GetReducedFromLeft(28.0f).GetReducedFromRight(16.0f);
+      const std::vector<std::string>& lines = mRowLines[i];
       const IText rowText(
         9.0f, nowPlaying ? COLOR_WHITE : IColor(255, 190, 193, 202), "Inter-Regular", EAlign::Near, EVAlign::Middle);
-      g.DrawText(
-        rowText, tonegallery::Ellipsize(stem, 72).c_str(), row.GetReducedFromLeft(28.0f).GetReducedFromRight(16.0f));
+      const float lineH = 12.0f;
+      float ty = row.T + (row.H() - lineH * (float)lines.size()) * 0.5f;
+      for (const auto& ln : lines)
+      {
+        g.DrawText(rowText, ln.c_str(), IRECT(textArea.L, ty, textArea.R, ty + lineH));
+        ty += lineH;
+      }
       // Now-playing LED
       if (nowPlaying)
       {
@@ -1375,7 +1410,7 @@ public:
         g.FillEllipse(accent, led);
       }
     }
-    sy += numVariants * kRowHeight;
+    sy += mVariantsTotalH;
 
     // Total scrollable content height (for the scrollbar + wheel clamp).
     mScrollContentH = sy - (scrollTop - mScroll);
@@ -1405,6 +1440,12 @@ public:
     {
       tonegallery::LoadToneEntryFiles(mEntry, mLoadModelFunc, mLoadIRFunc);
       tonegallery::NotifyNowPlaying(GetUI(), mEntry, mEntry.modelPath, mEntry.irPath);
+      return;
+    }
+    if (!mSeeAllRect.Empty() && mSeeAllRect.Contains(x, y))
+    {
+      mDescExpanded = !mDescExpanded;
+      SetDirty(false);
       return;
     }
     const int idx = RowAt(x, y);
@@ -1446,11 +1487,14 @@ public:
     IControl::OnMouseOver(x, y, mod);
     const bool overClose = CloseRect().Contains(x, y);
     const bool overLoad = mLoadButtonRect.Contains(x, y);
+    const bool overSeeAll = !mSeeAllRect.Empty() && mSeeAllRect.Contains(x, y);
     const int row = RowAt(x, y);
-    if (overClose != mMouseOverClose || overLoad != mMouseOverLoad || row != mMouseOverRow)
+    if (overClose != mMouseOverClose || overLoad != mMouseOverLoad || overSeeAll != mMouseOverSeeAll
+        || row != mMouseOverRow)
     {
       mMouseOverClose = overClose;
       mMouseOverLoad = overLoad;
+      mMouseOverSeeAll = overSeeAll;
       mMouseOverRow = row;
       SetDirty(false);
     }
@@ -1461,6 +1505,7 @@ public:
     IControl::OnMouseOut();
     mMouseOverClose = false;
     mMouseOverLoad = false;
+    mMouseOverSeeAll = false;
     mMouseOverRow = -1;
     SetDirty(false);
   }
@@ -1468,19 +1513,51 @@ public:
 private:
   IRECT CloseRect() const { return mRECT.GetFromTRHC(30.0f, 30.0f).GetCentredInside(20.0f); }
 
+  // Precompute per-variant wrapped name lines and row heights (single vs. two-line).
+  void BuildRows()
+  {
+    mRowLines.clear();
+    mRowHeights.clear();
+    mRowOffsets.clear();
+    const int nModels = (int)mEntry.models.size();
+    const int numVariants = nModels + (int)mEntry.irs.size();
+    float cum = 0.0f;
+    for (int i = 0; i < numVariants; i++)
+    {
+      const bool isIR = i >= nModels;
+      const std::string& path = isIR ? mEntry.irs[i - nModels] : mEntry.models[i];
+      const std::string stem = tonegallery::PathToUTF8(tonegallery::UTF8ToPath(path).stem());
+      std::vector<std::string> lines = tonegallery::WrapLines(stem, 72, 2);
+      if (lines.empty())
+        lines.push_back(std::string());
+      const float h = lines.size() >= 2 ? kRowH2 : kRowH1;
+      mRowOffsets.push_back(cum);
+      mRowHeights.push_back(h);
+      mRowLines.push_back(lines);
+      cum += h;
+    }
+    mVariantsTotalH = cum;
+  }
+
   IRECT RowRect(int i) const
   {
-    const float y = mListTop + i * kRowHeight;
-    return IRECT(mRECT.L + 10.0f, y, mRECT.R - 10.0f, y + kRowHeight);
+    const float top = mListTop + (i < (int)mRowOffsets.size() ? mRowOffsets[i] : (float)i * kRowH1);
+    const float h = (i < (int)mRowHeights.size() ? mRowHeights[i] : kRowH1);
+    return IRECT(mRECT.L + 10.0f, top, mRECT.R - 10.0f, top + h);
   }
 
   int RowAt(float x, float y) const
   {
     if (y < mScrollTop || y > mRECT.B - 8.0f)
       return -1;
-    const int numVariants = (int)(mEntry.models.size() + mEntry.irs.size());
-    const int idx = (int)((y - mListTop) / kRowHeight);
-    return (idx >= 0 && idx < numVariants) ? idx : -1;
+    const int n = (int)mRowHeights.size();
+    for (int i = 0; i < n; i++)
+    {
+      const IRECT row = RowRect(i);
+      if (y >= row.T && y < row.B)
+        return i;
+    }
+    return -1;
   }
 
   IBitmap* GetImage(const std::string& path)
@@ -1512,9 +1589,16 @@ private:
   float mScrollTop = 0.0f;
   float mScrollContentH = 0.0f;
   IRECT mLoadButtonRect;
+  IRECT mSeeAllRect;
+  bool mDescExpanded = false;
   bool mMouseOverClose = false;
   bool mMouseOverLoad = false;
+  bool mMouseOverSeeAll = false;
   int mMouseOverRow = -1;
+  std::vector<std::vector<std::string>> mRowLines;
+  std::vector<float> mRowHeights;
+  std::vector<float> mRowOffsets;
+  float mVariantsTotalH = 0.0f;
   std::map<std::string, IBitmap> mImageCache;
   IFileDialogCompletionHandlerFunc mLoadModelFunc;
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
