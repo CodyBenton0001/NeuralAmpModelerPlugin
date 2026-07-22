@@ -1207,7 +1207,7 @@ public:
     mDescExpanded = false;
     mSeeAllRect = IRECT();
     mMouseOverSeeAll = false;
-    BuildRows();
+    mRowsDirty = true;
     Hide(false);
     SetDirty(false);
   }
@@ -1371,9 +1371,15 @@ public:
     sy += 16.0f;
 
     // Variant rows (RowRect uses mListTop, which is already the scrolled top).
-    // Row geometry/wrapping is precomputed in BuildRows(); rebuild if stale.
-    if ((int)mRowLines.size() != numVariants)
-      BuildRows();
+    // Row geometry/wrapping is precomputed in BuildRows() against the panel's
+    // real text width; rebuild when the tone or the panel width changes.
+    const float availW = mRECT.W() - 66.0f;
+    if (mRowsDirty || mRowsBuiltW != availW || (int)mRowLines.size() != numVariants)
+    {
+      BuildRows(g, availW);
+      mRowsDirty = false;
+      mRowsBuiltW = availW;
+    }
     mListTop = sy;
     for (int i = 0; i < numVariants; i++)
     {
@@ -1513,12 +1519,81 @@ public:
 private:
   IRECT CloseRect() const { return mRECT.GetFromTRHC(30.0f, 30.0f).GetCentredInside(20.0f); }
 
-  // Precompute per-variant wrapped name lines and row heights (single vs. two-line).
-  void BuildRows()
+  // Word-wrap a string to at most maxLines lines that each fit maxW pixels,
+  // measuring with the real font so nothing ever clips at the panel edge.
+  // The final line is ellipsized if the text is still too long.
+  static std::vector<std::string> WrapToWidth(IGraphics& g, const IText& text, const std::string& s, float maxW,
+                                              int maxLines)
+  {
+    std::vector<std::string> lines;
+    std::string rest = s;
+    auto width = [&](const std::string& str) {
+      IRECT r;
+      g.MeasureText(text, str.c_str(), r);
+      return r.W();
+    };
+    while (!rest.empty() && (int)lines.size() < maxLines)
+    {
+      if (width(rest) <= maxW)
+      {
+        lines.push_back(rest);
+        rest.clear();
+        break;
+      }
+      if ((int)lines.size() == maxLines - 1)
+      {
+        // Last allowed line and it still overflows: trim + ellipsis to fit.
+        std::string t = rest;
+        while (t.size() > 1 && width(t + "...") > maxW)
+          t.pop_back();
+        lines.push_back(t + "...");
+        rest.clear();
+        break;
+      }
+      // Largest character prefix that fits maxW (binary search).
+      size_t lo = 1, hi = rest.size(), best = 1;
+      while (lo <= hi)
+      {
+        size_t mid = (lo + hi) / 2;
+        if (width(rest.substr(0, mid)) <= maxW)
+        {
+          best = mid;
+          lo = mid + 1;
+        }
+        else
+        {
+          if (mid == 0)
+            break;
+          hi = mid - 1;
+        }
+      }
+      // Prefer to break at a space at/near the fit point for tidy wrapping.
+      size_t brk = rest.rfind(' ', best);
+      if (brk == std::string::npos || brk + 1 < best / 2)
+        brk = best;
+      std::string line = rest.substr(0, brk);
+      while (!line.empty() && line.back() == ' ')
+        line.pop_back();
+      if (line.empty())
+        line = rest.substr(0, 1);
+      lines.push_back(line);
+      rest = rest.substr(brk >= rest.size() ? rest.size() : brk);
+      size_t p = 0;
+      while (p < rest.size() && rest[p] == ' ')
+        p++;
+      rest = rest.substr(p);
+    }
+    return lines;
+  }
+
+  // Precompute per-variant wrapped name lines and row heights (single vs. two-line),
+  // wrapping to the panel's real pixel width so long names show in full.
+  void BuildRows(IGraphics& g, float availW)
   {
     mRowLines.clear();
     mRowHeights.clear();
     mRowOffsets.clear();
+    const IText probe(9.0f, COLOR_WHITE, "Inter-Regular", EAlign::Near, EVAlign::Middle);
     const int nModels = (int)mEntry.models.size();
     const int numVariants = nModels + (int)mEntry.irs.size();
     float cum = 0.0f;
@@ -1527,7 +1602,7 @@ private:
       const bool isIR = i >= nModels;
       const std::string& path = isIR ? mEntry.irs[i - nModels] : mEntry.models[i];
       const std::string stem = tonegallery::PathToUTF8(tonegallery::UTF8ToPath(path).stem());
-      std::vector<std::string> lines = tonegallery::WrapLines(stem, 72, 2);
+      std::vector<std::string> lines = WrapToWidth(g, probe, stem, availW, 2);
       if (lines.empty())
         lines.push_back(std::string());
       const float h = lines.size() >= 2 ? kRowH2 : kRowH1;
@@ -1599,6 +1674,8 @@ private:
   std::vector<float> mRowHeights;
   std::vector<float> mRowOffsets;
   float mVariantsTotalH = 0.0f;
+  bool mRowsDirty = true;
+  float mRowsBuiltW = -1.0f;
   std::map<std::string, IBitmap> mImageCache;
   IFileDialogCompletionHandlerFunc mLoadModelFunc;
   IFileDialogCompletionHandlerFunc mLoadIRFunc;
