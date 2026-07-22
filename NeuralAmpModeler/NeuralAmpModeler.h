@@ -312,6 +312,15 @@ public:
     _UpdateBrowsersForEditSlot();
   }
 
+  // --- Instant Double-Track (final output stage) --------------------------
+  // Takes the finished mono tone (post-morph, post-EQ, post-chain, post-DC)
+  // and spreads it into two hard-panned, slightly detuned "takes" (L/R).
+  // Bass-center keeps the low end mono/centered so it stays tight.
+  void ToggleDoubleTrack() { mDoubleTrackActive = !mDoubleTrackActive.load(); }
+  void ToggleDoubleTrackBassCenter() { mDoubleTrackBassCenter = !mDoubleTrackBassCenter.load(); }
+  bool IsDoubleTrackActive() const { return mDoubleTrackActive.load(); }
+  bool IsDoubleTrackBassCenter() const { return mDoubleTrackBassCenter.load(); }
+
   // --- Rig presets (see NAMRigPresets.h) ----------------------------------
   // Capture the ENTIRE current rig (main model/IR, global knobs + toggles,
   // all chain slots with their settings) as JSON / apply one back.
@@ -359,6 +368,13 @@ private:
   // :param nChansOut: Out to external
   void _ProcessOutput(iplug::sample** inputs, iplug::sample** outputs, const size_t nFrames, const size_t nChansIn,
                       const size_t nChansOut);
+  // Instant double-track: render the finished mono tone into two hard-panned,
+  // slightly detuned voices (outL/outR), then write them out with output gain.
+  void _RenderDoubleTrack(iplug::sample* mono, const size_t nFrames, const double sampleRate, iplug::sample* outL,
+                          iplug::sample* outR);
+  iplug::sample _DTReadTap(int writePos, double delaySamples, int len) const;
+  void _ProcessOutputStereo(iplug::sample* left, iplug::sample* right, iplug::sample** outputs, const size_t nFrames,
+                            const size_t nChansOut);
   // Resetting for models and IRs, called by OnReset
   void _ResetModelAndIR(const double sampleRate, const int maxBlockSize);
 
@@ -465,6 +481,19 @@ private:
   std::array<iplug::sample*, kNumChainSlots> mChainScratchPointersB{};
   std::vector<iplug::sample> mMorphArrayA;
   std::vector<iplug::sample> mMorphArrayB;
+
+  // --- Instant Double-Track state (audio thread; UI toggles the atomics) ---
+  std::atomic<bool> mDoubleTrackActive{false};
+  std::atomic<bool> mDoubleTrackBassCenter{false};
+  std::vector<iplug::sample> mDTBuf; // circular history of the fed signal
+  std::vector<iplug::sample> mDTOutL; // rendered left voice
+  std::vector<iplug::sample> mDTOutR; // rendered right voice
+  int mDTWritePos = 0;
+  bool mDTActivePrev = false;
+  double mDTPhaseL = 0.0;
+  double mDTPhaseR = 1.7;
+  double mDTLowState = 0.0;
+
   // Main-knob backup while a chain slot borrows the knobs.
   bool mKnobEditActive = false;
   double mMainKnobBackup[5] = {0.0, 5.0, 5.0, 5.0, 0.0};
