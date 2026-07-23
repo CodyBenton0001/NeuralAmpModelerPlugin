@@ -44,9 +44,11 @@ NAMSquareButtonControl(const IRECT& bounds, IActionFunction af, const ISVG& svg)
 void Draw(IGraphics& g) override
 {
 if (mMouseIsOver)
-g.FillRoundRect(PluginColors::MOUSEOVER, mRECT, 2.f);
+g.FillRect(PluginColors::MOUSEOVER, mRECT);
 
-ISVGButtonControl::Draw(g);
+// AMPRYX: tint the icon with the live accent so the colour picker drives it.
+const IColor c = ampryx::Accent();
+g.DrawSVG(mOffSVG, mRECT, &mBlend, &c, &c);
 }
 };
 
@@ -63,7 +65,9 @@ void Draw(IGraphics& g) override
 if (mMouseIsOver)
 g.FillEllipse(PluginColors::MOUSEOVER, mRECT);
 
-ISVGButtonControl::Draw(g);
+// AMPRYX: tint the icon with the live accent so the colour picker drives it.
+const IColor c = ampryx::Accent();
+g.DrawSVG(mOffSVG, mRECT, &mBlend, &c, &c);
 }
 };
 

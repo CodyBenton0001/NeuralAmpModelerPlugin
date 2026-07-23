@@ -54,14 +54,14 @@ public:
     if (hasB)
     {
       // Active morph knob: thick track + value ring with a glowing dot.
-      g.DrawArc(namtheme::TRACK, cx, cy, radius, a1, a2, nullptr, 7.0f);
+      g.DrawArc(namtheme::Track(), cx, cy, radius, a1, a2, nullptr, 7.0f);
       if (angle > a1 + 0.5f)
         g.DrawArc(arcCol, cx, cy, radius, a1, angle, nullptr, 7.0f);
 
       const float capR = radius - 9.0f;
       const IRECT capRect(cx - capR, cy - capR, cx + capR, cy + capR);
       g.FillEllipse(namtheme::KNOB_FACE, capRect);
-      g.DrawEllipse(namtheme::LINE, capRect);
+      g.DrawEllipse(namtheme::Line(), capRect);
       if (mHover)
         g.FillEllipse(PluginColors::MOUSEOVER, capRect);
 
@@ -188,7 +188,7 @@ public:
     // Pill + handle drawn to match ThemedSwitchControl; label centered below.
     const IRECT widget = mRECT.GetReducedFromBottom(13.0f);
     const IRECT pill = widget.GetCentredInside(30.0f, 15.0f);
-    g.FillRoundRect(on && enabled ? accent : IColor(40, 233, 195, 74), pill, pill.H() * 0.5f);
+    g.FillRoundRect(on && enabled ? accent : namtheme::Accent().WithOpacity(0.16f), pill, pill.H() * 0.5f);
     if (mHover && enabled)
       g.FillRoundRect(PluginColors::MOUSEOVER, pill, pill.H() * 0.5f);
     const float hr = 5.5f;
@@ -303,7 +303,7 @@ public:
                                                 {{COLOR_TRANSPARENT, 0.3f}, {namtheme::CARD.WithOpacity(0.8f), 1.0f}}));
       g.PathClipRegion();
     }
-    g.DrawRect(active ? accent : namtheme::LINE, card, nullptr, active ? 2.0f : 1.0f);
+    g.DrawRect(active ? accent : namtheme::Line(), card, nullptr, active ? 2.0f : 1.0f);
 
     const IRECT labelRow = card.GetFromTop(16.0f).GetReducedFromLeft(8.0f).GetReducedFromTop(3.0f);
     const IText labelText(
@@ -497,7 +497,7 @@ public:
     // Header: title + the rig preset bar
     const IRECT header = mRECT.GetFromTop(kChainHeaderHeight);
     g.FillRect(namtheme::PANEL2, header);
-    g.FillRect(namtheme::GOLD.WithOpacity(0.55f), header.GetFromBottom(1.0f));
+    g.FillRect(namtheme::Gold().WithOpacity(0.55f), header.GetFromBottom(1.0f));
     const IText titleText(12.0f, namtheme::TEXT_MAIN, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
     namtheme::DrawSpacedText(g, "SIGNAL CHAIN", titleText, header.L + 16.0f, header.T, header.B, 1.6f);
     DrawPresetBar(g, accent);
@@ -1226,7 +1226,7 @@ private:
     // AMPRYX faceplate: flat near-black panel with a gold rule underneath
     // (the skeuomorphic rack ears + screws are gone).
     g.FillRect(namtheme::PANEL2, face);
-    g.FillRect(namtheme::GOLD.WithOpacity(0.35f), face.GetFromBottom(1.0f));
+    g.FillRect(namtheme::Gold().WithOpacity(0.35f), face.GetFromBottom(1.0f));
 
     const bool enabled = GetUnitEnabled(i);
 

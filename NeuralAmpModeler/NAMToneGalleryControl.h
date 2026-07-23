@@ -280,6 +280,20 @@ inline IColor AccentColor()
 {
   return MutableAccent();
 }
+} // namespace tonegallery
+
+// AMPRYX: definition of the early-declared accent accessor (see Colors.h), so
+// controls defined before this header can tint with the runtime accent.
+namespace ampryx
+{
+inline iplug::igraphics::IColor Accent()
+{
+  return tonegallery::AccentColor();
+}
+} // namespace ampryx
+
+namespace tonegallery
+{
 
 // Read-modify-write a single key in theme.json (so the accent and the UI
 // scale don't clobber each other).
@@ -1335,7 +1349,7 @@ public:
         if (x + tw > body.R)
           break;
         const IRECT chip(x, y + 2.0f, x + tw, y + 15.0f);
-        g.FillRect(IColor(20, 233, 195, 74), chip);
+        g.FillRect(tonegallery::AccentColor().WithOpacity(0.08f), chip);
         g.DrawText(tagText, t.c_str(), chip);
         x += tw + 4.0f;
       }
@@ -1761,7 +1775,7 @@ public:
     // Panel (AMPRYX: near-black sidebar with a solid 2px gold right edge,
     // matching the mock's border-right on the tone library column).
     g.FillRect(IColor(255, 10, 9, 6), mRECT);
-    g.FillRect(IColor(255, 233, 195, 74), mRECT.GetFromRight(2.0f));
+    g.FillRect(tonegallery::AccentColor(), mRECT.GetFromRight(2.0f));
 
     // Header ("TONE LIBRARY" in Archivo Black, per the mock)
     const IRECT header = mRECT.GetFromTop(kHeaderHeight);
@@ -1796,14 +1810,14 @@ public:
         g.FillRect(tonegallery::AccentColor(), chip);
       else
       {
-        g.FillRect(IColor(15, 233, 195, 74), chip);
-        g.DrawRect(IColor(51, 233, 195, 74), chip, nullptr, 1.0f);
+        g.FillRect(tonegallery::AccentColor().WithOpacity(0.06f), chip);
+        g.DrawRect(tonegallery::AccentColor().WithOpacity(0.20f), chip, nullptr, 1.0f);
       }
       if (isOver && !isActive)
         g.FillRect(PluginColors::MOUSEOVER, chip);
       g.DrawText(isActive ? chipTextActive : chipTextInactive, tonegallery::FilterLabel(i), chip);
     }
-    g.FillRect(IColor(40, 233, 195, 74), mRECT.GetFromTop(kHeaderHeight + kFilterAreaHeight).GetFromBottom(1.0f));
+    g.FillRect(tonegallery::AccentColor().WithOpacity(0.16f), mRECT.GetFromTop(kHeaderHeight + kFilterAreaHeight).GetFromBottom(1.0f));
 
     // Cards
     const IRECT grid = GridArea();
@@ -2111,7 +2125,7 @@ private:
       IRECT tagChip = tagRow.GetReducedFromLeft(gearW + 4.0f).GetFromLeft(tagW);
       if (tagChip.R <= card.R - 4.0f)
       {
-        g.FillRect(IColor(20, 233, 195, 74), tagChip);
+        g.FillRect(tonegallery::AccentColor().WithOpacity(0.08f), tagChip);
         const IText tagText(6.5f, IColor(255, 147, 140, 120), "JetBrainsMono-Regular", EAlign::Center, EVAlign::Middle);
         g.DrawText(tagText, tag.c_str(), tagChip);
       }
@@ -2131,7 +2145,7 @@ private:
     }
     else
     {
-      g.DrawRect(IColor(51, 233, 195, 74), card.GetPadded(-0.5f), nullptr, 1.0f);
+      g.DrawRect(tonegallery::AccentColor().WithOpacity(0.20f), card.GetPadded(-0.5f), nullptr, 1.0f);
     }
   }
 

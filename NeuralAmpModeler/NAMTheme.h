@@ -23,19 +23,21 @@ const IColor PANEL2(255, 15, 13, 8); // knob card (#0f0d08)
 const IColor CARD(255, 16, 14, 9); // tone cards, file rows, meters (#100e09)
 const IColor CARD_RAISED(255, 21, 18, 10); // favorite buttons top (#15120a)
 const IColor KNOB_FACE(255, 11, 10, 7); // knob centre (#0b0a07)
-const IColor LINE(36, 233, 195, 74); // hairline borders (gold @ 14%)
-const IColor BORDER(255, 233, 195, 74); // solid 2px accent border (#e9c34a)
-const IColor TRACK(36, 233, 195, 74); // knob track arc (gold @ 14%)
 const IColor TEXT_MAIN(255, 236, 230, 212); // #ece6d4
 const IColor TEXT_DIM(255, 147, 140, 120); // #938c78
 const IColor TEXT_FAINT(255, 107, 101, 82); // #6b6552
-const IColor GOLD(255, 233, 195, 74); // canonical AMPRYX gold (#e9c34a)
 
-// Runtime accent (user-selectable, persisted by the gallery header).
+// Runtime accent (user-selectable, persisted by the gallery header). Every
+// "gold" in the skin derives from this, so the accent picker re-tints the
+// whole UI -- borders, hairlines, knob tracks and icons included.
 inline IColor Accent()
 {
 return tonegallery::AccentColor();
 }
+inline IColor Gold() { return Accent(); } // canonical accent fill
+inline IColor Border() { return Accent(); } // solid 2px accent border
+inline IColor Line() { return Accent().WithOpacity(0.14f); } // hairline borders
+inline IColor Track() { return Accent().WithOpacity(0.14f); } // knob track arc
 
 // AMPRYX skin fonts. kFontBody/kFontBold keep their legacy names (many controls
 // reference them) but now map to JetBrains Mono via the font registration in the
@@ -157,14 +159,19 @@ mIgnoreMouse = true;
 
 void Draw(IGraphics& g) override
 {
-if (!g.CheckLayer(mLayer))
+// Rebuild the cached layer when the accent changes, so the colour picker
+// re-tints the grid too (the layer would otherwise keep the old colour).
+const IColor a = namtheme::Accent();
+const bool accentChanged = (a.R != mCachedAccent.R || a.G != mCachedAccent.G || a.B != mCachedAccent.B);
+if (!g.CheckLayer(mLayer) || accentChanged)
 {
 g.StartLayer(this, mRECT);
-const IColor dot = namtheme::GOLD.WithOpacity(mOpacity);
+const IColor dot = a.WithOpacity(mOpacity);
 for (float y = mRECT.T + 1.0f; y < mRECT.B; y += mPitch)
 for (float x = mRECT.L + 1.0f; x < mRECT.R; x += mPitch)
 g.FillRect(dot, IRECT(x, y, x + 1.0f, y + 1.0f));
 mLayer = g.EndLayer();
+mCachedAccent = a;
 }
 g.DrawLayer(mLayer);
 }
@@ -175,6 +182,7 @@ private:
 float mPitch;
 float mOpacity;
 ILayerPtr mLayer;
+IColor mCachedAccent = COLOR_TRANSPARENT;
 };
 
 // Halftone-engraving background texture (AsciiHero / AsciiToneA). Draws the
@@ -216,7 +224,7 @@ g.DrawFittedBitmap(mBitmap, cover, &blend);
 if (mFlip)
 g.PathTransformReset();
 // Gold wash to tint the greyscale engraving toward the accent.
-g.FillRect(namtheme::GOLD.WithOpacity(0.10f), mRECT, &BlendAdd());
+g.FillRect(namtheme::Gold().WithOpacity(0.10f), mRECT, &BlendAdd());
 // Radial vignette so the texture reads only in the centre.
 g.PathClear();
 g.PathRect(mRECT);
@@ -247,7 +255,7 @@ AmpryxWindowFrameControl(const IRECT& bounds)
 mIgnoreMouse = true;
 }
 
-void Draw(IGraphics& g) override { g.DrawRect(namtheme::BORDER, mRECT.GetPadded(-1.0f), &mBlend, 2.0f); }
+void Draw(IGraphics& g) override { g.DrawRect(namtheme::Border(), mRECT.GetPadded(-1.0f), &mBlend, 2.0f); }
 };
 
 // AMPRYX bottom utility bar background: a thin panel with a hairline top border
@@ -266,7 +274,7 @@ void Draw(IGraphics& g) override
 {
 // AMPRYX footer: near-black strip, faint gold outline, letter-spaced label.
 g.FillRect(namtheme::BG, mRECT);
-g.DrawRect(namtheme::LINE, mRECT.GetPadded(-0.5f), &mBlend, 1.0f);
+g.DrawRect(namtheme::Line(), mRECT.GetPadded(-0.5f), &mBlend, 1.0f);
 const IText v(9.5f, namtheme::TEXT_FAINT, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
 namtheme::DrawSpacedText(g, mVersion.Get(), v, mRECT.L + 18.0f, mRECT.T, mRECT.B, 1.6f);
 }
@@ -374,7 +382,7 @@ const IColor accent = GetColor(kX1);
 
 // Track + value arcs (thick conic-style ring, AMPRYX mock).
 const float kArcW = 7.0f;
-g.DrawArc(namtheme::TRACK, cx, cy, widgetRadius, mAngle1, mAngle2, &mBlend, kArcW);
+g.DrawArc(namtheme::Track(), cx, cy, widgetRadius, mAngle1, mAngle2, &mBlend, kArcW);
 if (angle > mAngle1 + 0.5f)
 g.DrawArc(accent, cx, cy, widgetRadius, mAngle1, angle, &mBlend, kArcW);
 
@@ -382,7 +390,7 @@ g.DrawArc(accent, cx, cy, widgetRadius, mAngle1, angle, &mBlend, kArcW);
 const float capR = widgetRadius - 9.0f;
 const IRECT capRect(cx - capR, cy - capR, cx + capR, cy + capR);
 g.FillEllipse(namtheme::KNOB_FACE, capRect, &mBlend);
-g.DrawEllipse(namtheme::LINE, capRect, &mBlend, 1.0f);
+g.DrawEllipse(namtheme::Line(), capRect, &mBlend, 1.0f);
 if (mMouseIsOver)
 g.FillEllipse(PluginColors::MOUSEOVER, capRect, &mBlend);
 
@@ -453,7 +461,7 @@ void DrawBackground(IGraphics& g, const IRECT& r) override
 {
 const IRECT card = r.GetMidHPadded(5.0f);
 g.FillRoundRect(namtheme::CARD, card, 5.0f);
-g.DrawRoundRect(namtheme::LINE, card, 5.0f);
+g.DrawRoundRect(namtheme::Line(), card, 5.0f);
 }
 
 void DrawTrackHandle(IGraphics& g, const IRECT& r, int chIdx, bool aboveBaseValue) override

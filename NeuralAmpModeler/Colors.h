@@ -37,4 +37,12 @@ const iplug::igraphics::IColor HELP_TEXT_CLICKED = iplug::igraphics::COLOR_WHITE
 
 }; // namespace PluginColors
 
+// AMPRYX: the runtime accent lives in the tone gallery, which is included after
+// the base controls. Declare it here so controls defined earlier can tint
+// themselves (SVG icons etc.) with the user's chosen accent colour.
+namespace ampryx
+{
+iplug::igraphics::IColor Accent();
+}
+
 #endif /* Colors_h */
