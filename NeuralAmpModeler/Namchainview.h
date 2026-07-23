@@ -187,13 +187,13 @@ public:
     const bool enabled = Enabled();
     // Pill + handle drawn to match ThemedSwitchControl; label centered below.
     const IRECT widget = mRECT.GetReducedFromBottom(13.0f);
-    const IRECT pill = widget.GetCentredInside(34.0f, 17.0f);
-    g.FillRoundRect(on && enabled ? accent : IColor(26, 255, 255, 255), pill, pill.H() * 0.5f);
+    const IRECT pill = widget.GetCentredInside(30.0f, 15.0f);
+    g.FillRoundRect(on && enabled ? accent : IColor(40, 233, 195, 74), pill, pill.H() * 0.5f);
     if (mHover && enabled)
       g.FillRoundRect(PluginColors::MOUSEOVER, pill, pill.H() * 0.5f);
-    const float hr = 6.0f;
-    const float hx = on ? pill.R - 2.5f - hr : pill.L + 2.5f + hr;
-    g.FillCircle(on && enabled ? COLOR_WHITE : IColor(255, 130, 130, 138), hx, pill.MH(), hr);
+    const float hr = 5.5f;
+    const float hx = on ? pill.R - 2.0f - hr : pill.L + 2.0f + hr;
+    g.FillCircle(on && enabled ? namtheme::BG : namtheme::TEXT_FAINT, hx, pill.MH(), hr);
     const IColor txt = PluginColors::NAM_THEMEFONTCOLOR.WithOpacity(enabled ? 0.65f : 0.3f);
     const IText label(11.0f, txt, "Inter-Bold", EAlign::Center, EVAlign::Middle);
     g.DrawText(label, mLabel.c_str(), mRECT.GetFromBottom(13.0f));

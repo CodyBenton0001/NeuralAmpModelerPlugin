@@ -179,10 +179,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto rightRegion = b.GetReducedFromLeft(kSidebarWidth);
     // AMPRYX skin: stacked from the bottom -- utility bar, output scope, the
     // favorites bar, then the main UI above them all.
-    const auto utilityBarArea = rightRegion.GetFromBottom(kUtilityBarHeight);
+    // Same flush span as the knob panel (46px in from the main-panel edges).
+    const auto utilityBarArea =
+      rightRegion.GetFromBottom(kUtilityBarHeight).GetReducedFromLeft(46.0f).GetReducedFromRight(46.0f);
     const auto outputScopeArea = rightRegion.GetReducedFromBottom(kUtilityBarHeight)
                                    .GetFromBottom(kOutputScopeHeight)
-                                   .GetHPadded(-20.0f)
+                                   .GetReducedFromLeft(46.0f)
+                                   .GetReducedFromRight(46.0f)
                                    .GetVPadded(-4.0f);
     const auto favoritesArea =
       rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight).GetFromBottom(kFavoritesBarHeight);
@@ -221,20 +224,18 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto doubleTrackSwitchArea = toggleBarInner.GetGridCell(0, 2, 1, 4);
     const auto bassCenterSwitchArea = toggleBarInner.GetGridCell(0, 3, 1, 4);
 
-    // Areas for model and IR
-    const auto fileWidth = 200.0f;
-    const auto fileHeight = 30.0f;
-    const auto irYOffset = 38.0f;
-    const auto modelArea =
-      contentArea.GetFromBottom((2.0f * fileHeight)).GetFromTop(fileHeight).GetMidHPadded(fileWidth).GetVShifted(-1);
-    const auto modelIconArea = modelArea.GetFromLeft(30).GetTranslated(-40, 10);
-    const auto irArea = modelArea.GetVShifted(irYOffset);
-    const auto irSwitchArea = irArea.GetFromLeft(30.0f).GetHShifted(-40.0f).GetScaledAboutCentre(0.6f);
-    // Tone Morph: slim icon moved next to the IR box (the model box is hidden),
-    // and the A TONE / B TONE cards sit just above the IR box.
+    // AMPRYX skin: everything below the toggle bar shares one flush span with
+    // the knob panel / toggle bar. Stacked top-down: A/B tone cards, then the
+    // full-span IR row (with the IR bypass toggle in a slot at its right end).
+    const float spanL = knobsArea.L - 4.0f;
+    const float spanR = knobsArea.R + 4.0f;
+    const auto morphCardsArea = IRECT(spanL, toggleBar.B + 10.0f, spanR, toggleBar.B + 66.0f);
+    const auto irArea = IRECT(spanL, morphCardsArea.B + 10.0f, spanR - 34.0f, morphCardsArea.B + 44.0f);
+    const auto irSwitchArea = IRECT(spanR - 26.0f, irArea.MH() - 9.0f, spanR - 8.0f, irArea.MH() + 9.0f);
+    // Hidden legacy model browser keeps a rect stacked above the IR row.
+    const auto modelArea = irArea.GetVShifted(-38.0f);
     const auto slimIconArea =
       IRECT(irArea.R + 6.f, irArea.MH() - 14.f, irArea.R + 6.f + 2.f * 28.f, irArea.MH() + 14.f);
-    const auto morphCardsArea = IRECT(contentArea.L + 26.0f, irArea.T - 62.0f, contentArea.R - 26.0f, irArea.T - 6.0f);
 
     // Meters: thin vertical bars flanking the knob panel (AMPRYX mock).
     const auto knobPanelRect = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);

@@ -422,17 +422,17 @@ style.WithShowValue(false).WithDrawFrame(false).WithDrawShadows(false).WithLabel
 void DrawWidget(IGraphics& g) override
 {
 const bool on = GetValue() > 0.5;
-// AMPRYX mock: 44x22 pill, gold when on / faint gold when off, with a dark
-// handle when on and a muted handle when off.
-const IRECT pill = mWidgetBounds.GetCentredInside(44.0f, 22.0f);
+// AMPRYX mock proportions: 30x15 pill, gold when on / faint gold when off,
+// with a dark handle when on and a muted handle when off.
+const IRECT pill = mWidgetBounds.GetCentredInside(30.0f, 15.0f);
 const IColor accent = GetColor(kX1);
 
 g.FillRoundRect(on ? accent : IColor(40, 233, 195, 74), pill, pill.H() * 0.5f, &mBlend);
 if (mMouseIsOver)
 g.FillRoundRect(PluginColors::MOUSEOVER, pill, pill.H() * 0.5f, &mBlend);
 
-const float hr = 8.0f;
-const float hx = on ? pill.R - 3.0f - hr : pill.L + 3.0f + hr;
+const float hr = 5.5f;
+const float hx = on ? pill.R - 2.0f - hr : pill.L + 2.0f + hr;
 g.FillCircle(on ? namtheme::BG : namtheme::TEXT_FAINT, hx, pill.MH(), hr, &mBlend);
 }
 };
@@ -502,9 +502,10 @@ bitmap, globeSVG, getButtonLabel, getButtonURL)
 
 void Draw(IGraphics& g) override
 {
+// AMPRYX: square row, near-black fill, thin gold border.
 const IRECT card = mRECT.GetPadded(-1.0f);
-g.FillRoundRect(namtheme::CARD, card, 9.0f);
-g.DrawRoundRect(mAccent.WithOpacity(0.4f), card, 9.0f);
+g.FillRect(namtheme::PANEL2, card);
+g.DrawRect(mAccent.WithOpacity(0.55f), card, nullptr, 1.0f);
 }
 
 private:
