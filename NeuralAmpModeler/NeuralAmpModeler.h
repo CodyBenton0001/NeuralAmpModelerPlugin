@@ -47,7 +47,6 @@ enum EParams
   kCalibrateInput,
   kInputCalibrationLevel,
   kOutputMode,
-  kSlim,
   kNumParams
 };
 
@@ -63,9 +62,6 @@ enum ECtrlTags
   kCtrlTagOutputMode,
   kCtrlTagCalibrateInput,
   kCtrlTagInputCalibrationLevel,
-  kCtrlTagSlimmableIcon,
-  kCtrlTagSlimOverlayBackdrop,
-  kCtrlTagSlimKnob,
   kNumCtrlTags
 };
 
@@ -267,12 +263,21 @@ public:
     WDL_String irBPath;
     WDL_String toneBPath;
     std::atomic<double> morph{0.0};
+    // Per-tone model quality (slimmable sub-model select). 0 = smallest /
+    // cheapest, 1 = largest / best. Applies to this slot's A and B models
+    // independently. Not a plugin parameter: swapping sub-models is not
+    // real-time safe, so this is UI-driven state persisted with the preset.
+    std::atomic<double> slimA{1.0};
+    std::atomic<double> slimB{1.0};
   };
 
   std::array<ChainSlot, kNumChainSlots> mChainSlots;
   // Unit-1 (main model) chain controls
   std::atomic<bool> mChainMainEnabled{true};
   std::atomic<double> mChainMainLevelDB{0.0};
+  // Unit-1 (main model) per-tone quality, matching ChainSlot::slimA/slimB.
+  std::atomic<double> mMainSlimA{1.0};
+  std::atomic<double> mMainSlimB{1.0};
   // Whether the stacked chain view is showing (persists across editor reopen)
   bool mToneChainMode = false;
   // Which chain unit the full UI is currently choosing a tone for:
@@ -305,6 +310,13 @@ public:
   void SetUnitMorph(int unit, double amt01);
   double GetUnitMorph(int unit) const;
   bool UnitHasB(int unit) const;
+  // --- Per-tone model quality ---------------------------------------------
+  // unit 0 = main model, 1..kNumChainSlots = extra slots; isB selects the
+  // unit's B (morph) tone. Applies immediately to that tone's loaded model.
+  void SetUnitSlim(int unit, bool isB, double amt01);
+  double GetUnitSlim(int unit, bool isB) const;
+  // True when that tone has a model loaded that actually supports slimming.
+  bool UnitToneIsSlimmable(int unit, bool isB) const;
   const char* GetUnitBTonePath(int unit) const;
   void SetChainEditTargetB(bool b)
   {

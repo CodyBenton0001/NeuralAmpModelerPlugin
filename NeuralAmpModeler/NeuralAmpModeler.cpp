@@ -107,7 +107,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kCalibrateInput)->InitBool(kCalibrateInputParamName.c_str(), kDefaultCalibrateInput);
   GetParam(kInputCalibrationLevel)
     ->InitDouble(kInputCalibrationLevelParamName.c_str(), kDefaultInputCalibrationLevel, -60.0, 60.0, 0.1, "dBu");
-  GetParam(kSlim)->InitDouble("Slim", 0.0, 0.0, 1.0, 0.01);
+  // NOTE: the old global "Slim" parameter is gone -- model quality is now
+  // per-tone UI state (see ChainSlot::slimA/slimB and mMainSlimA/B), because
+  // swapping sub-models is not real-time safe and shouldn't be automated.
 
   mNoiseGateTrigger.AddListener(&mNoiseGateGain);
 
@@ -157,7 +159,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto modelIconSVG = pGraphics->LoadSVG(MODEL_ICON_FN);
     const auto irIconOnSVG = pGraphics->LoadSVG(IR_ICON_ON_FN);
     const auto irIconOffSVG = pGraphics->LoadSVG(IR_ICON_OFF_FN);
-    const auto slimIconSVG = pGraphics->LoadSVG(SLIMMABLE_ICON_FN);
 
     const auto backgroundBitmap = pGraphics->LoadBitmap(BACKGROUND_FN);
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
@@ -230,11 +231,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto irSwitchArea = IRECT(spanR - 26.0f, irArea.MH() - 9.0f, spanR - 8.0f, irArea.MH() + 9.0f);
     // Hidden legacy model browser keeps a rect stacked above the IR row.
     const auto modelArea = irArea.GetVShifted(-38.0f);
-    // Slim (model-complexity) toggle -- only shown for slimmable models. Parked
-    // in the utility bar alongside the other icons instead of floating past the
-    // right edge of the IR row.
-    const auto slimIconArea =
-      utilityBarArea.GetFromRight(30.0f).GetCentredInside(15.0f).GetTranslated(-4.0f * 24.0f, 0.0f);
 
     // Meters: thin vertical bars flanking the knob panel (AMPRYX mock).
     const auto knobPanelRect = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
@@ -416,31 +412,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         kCtrlTagModelFileBrowser)
       ->Hide(true); // Tone Morph: model box hidden; the A/B cards replace it
 
-    auto hideSlimOverlay = [](IControl* pCaller) {
-      IGraphics* ui = pCaller->GetUI();
-      if (auto* backdrop = ui->GetControlWithTag(kCtrlTagSlimOverlayBackdrop))
-        backdrop->Hide(true);
-      if (auto* knob = ui->GetControlWithTag(kCtrlTagSlimKnob))
-        knob->Hide(true);
-      ui->SetAllControlsDirty();
-    };
-    auto showSlimOverlay = [](IControl* pCaller) {
-      // The Slim icon is always visible but disabled for models that can't be
-      // slimmed; ignore the click in that state (controls still receive mouse
-      // events when disabled -- see SetMouseEventsWhenDisabled below).
-      if (pCaller->IsDisabled())
-        return;
-      IGraphics* ui = pCaller->GetUI();
-      if (auto* backdrop = ui->GetControlWithTag(kCtrlTagSlimOverlayBackdrop))
-        backdrop->Hide(false);
-      if (auto* knob = ui->GetControlWithTag(kCtrlTagSlimKnob))
-        knob->Hide(false);
-      ui->SetAllControlsDirty();
-    };
-
-    // NOTE: the Slim icon lives in the utility bar and is attached further down,
-    // AFTER the utility-bar background -- attaching it here would put it behind
-    // that fill and make it invisible.
 
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle))
       ->Hide(true); // AMPRYX skin: no bypass icon; the parameter remains automatable
@@ -486,14 +457,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMAccentPickerControl(ubAccentArea));
     pGraphics->AttachControl(new NAMRackButtonControl(ubRackArea));
     pGraphics->AttachControl(new NAMZoomButtonControl(ubZoomArea));
-    // Slim (model-complexity) toggle: always visible here, dimmed until a
-    // slimmable model is loaded. Attached after the bar background so it isn't
-    // painted over.
-    pGraphics
-      ->AttachControl(
-        new NAMSquareButtonControl(slimIconArea, DefaultClickActionFunc, slimIconSVG), kCtrlTagSlimmableIcon)
-      ->SetAnimationEndActionFunction(showSlimOverlay)
-      ->SetDisabled(true);
     pGraphics->AttachControl(new NAMChainButtonControl(chainButtonArea));
 
     // Settings/help/about box opener (gear, far right of the utility bar).
@@ -534,13 +497,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->AttachControl(new NAMSettingsPageControl(mainB, backgroundBitmap, inputLevelBackgroundBitmap,
                                                  switchHandleBitmap, crossSVG, style, radioButtonStyle),
                       kCtrlTagSettingsBox)
-      ->Hide(true);
-
-    const auto slimKnobArea = mainB.GetCentredInside(100.f, NAM_KNOB_HEIGHT + 24.f);
-    pGraphics->AttachControl(new NAMSlimOverlayBackdropControl(mainB, hideSlimOverlay), kCtrlTagSlimOverlayBackdrop)
-      ->Hide(true);
-    pGraphics
-      ->AttachControl(new NAMKnobControl(slimKnobArea, kSlim, "Slim", style, knobBackgroundBitmap), kCtrlTagSlimKnob)
       ->Hide(true);
 
     // Rack view overlay (shown by shrinking the window).
@@ -924,15 +880,6 @@ void NeuralAmpModeler::OnIdle()
       // FIXME -- need to disable only the "normalized" model
       // pGraphics->GetControlWithTag(kCtrlTagOutputMode)->SetDisabled(false);
       static_cast<NAMSettingsPageControl*>(pGraphics->GetControlWithTag(kCtrlTagSettingsBox))->ClearModelInfo();
-      if (auto* p = pGraphics->GetControlWithTag(kCtrlTagSlimmableIcon))
-      {
-        p->Hide(false); // stays visible, just dimmed with no model loaded
-        p->SetDisabled(true);
-      }
-      if (auto* p = pGraphics->GetControlWithTag(kCtrlTagSlimOverlayBackdrop))
-        p->Hide(true);
-      if (auto* p = pGraphics->GetControlWithTag(kCtrlTagSlimKnob))
-        p->Hide(true);
       pGraphics->SetAllControlsDirty();
       mModelCleared = false;
     }
@@ -955,7 +902,7 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
   // Tone Gallery fork: append the signal-chain block. Old versions of the
   // plugin simply never read this far, so this stays backwards-compatible.
-  chunk.PutStr("###NAMChainV5###");
+  chunk.PutStr("###NAMChainV6###");
   int mainEnabled = mChainMainEnabled.load() ? 1 : 0;
   double mainLevel = mChainMainLevelDB.load();
   int chainMode = mToneChainMode ? 1 : 0;
@@ -987,6 +934,11 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
     chunk.PutStr(slot.toneBPath.Get());
     double morph = slot.morph.load();
     chunk.Put(&morph);
+    // V6: this slot's per-tone model quality (A and B)
+    double slimA = slot.slimA.load();
+    double slimB = slot.slimB.load();
+    chunk.Put(&slimA);
+    chunk.Put(&slimB);
   }
   // V3: which rig preset is loaded (so SAVE knows what to overwrite)
   chunk.PutStr(mRigPresetRel.Get());
@@ -1001,6 +953,11 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
   int dtBassCenter = mDoubleTrackBassCenter.load() ? 1 : 0;
   chunk.Put(&dtActive);
   chunk.Put(&dtBassCenter);
+  // V6: the main unit's per-tone model quality (A and B)
+  double mainSlimA = mMainSlimA.load();
+  double mainSlimB = mMainSlimB.load();
+  chunk.Put(&mainSlimA);
+  chunk.Put(&mainSlimB);
   return ok;
 }
 
@@ -1051,7 +1008,8 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
   const bool isV3 = pos > startPos && strcmp(marker.Get(), "###NAMChainV3###") == 0;
   const bool isV4 = pos > startPos && strcmp(marker.Get(), "###NAMChainV4###") == 0;
   const bool isV5 = pos > startPos && strcmp(marker.Get(), "###NAMChainV5###") == 0;
-  if (!isV1 && !isV2 && !isV3 && !isV4 && !isV5)
+  const bool isV6 = pos > startPos && strcmp(marker.Get(), "###NAMChainV6###") == 0;
+  if (!isV1 && !isV2 && !isV3 && !isV4 && !isV5 && !isV6)
     return startPos; // no chain block in this save
 
   int mainEnabled = 1, chainMode = 0;
@@ -1091,7 +1049,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     if (pos < 0)
       return startPos;
     double inputDB = 0.0, bass = 5.0, middle = 5.0, treble = 5.0;
-    if (isV2 || isV3 || isV4 || isV5)
+    if (isV2 || isV3 || isV4 || isV5 || isV6)
     {
       pos = chunk.Get(&inputDB, pos);
       if (pos < 0)
@@ -1109,7 +1067,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     // V4: this slot's Tone Morph B tone + morph amount
     WDL_String modelBPath, irBPath, toneBPath;
     double morph = 0.0;
-    if (isV4 || isV5)
+    if (isV4 || isV5 || isV6)
     {
       pos = chunk.GetStr(modelBPath, pos);
       if (pos < 0)
@@ -1124,6 +1082,17 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
       if (pos < 0)
         return startPos;
     }
+    // V6: per-tone model quality. Older saves default to full quality.
+    double slimA = 1.0, slimB = 1.0;
+    if (isV6)
+    {
+      pos = chunk.Get(&slimA, pos);
+      if (pos < 0)
+        return startPos;
+      pos = chunk.Get(&slimB, pos);
+      if (pos < 0)
+        return startPos;
+    }
     slot.enabled = enabled != 0;
     slot.levelDB = level;
     slot.inputDB = inputDB;
@@ -1131,6 +1100,8 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     slot.middle = middle;
     slot.treble = treble;
     slot.morph = morph;
+    slot.slimA = slimA;
+    slot.slimB = slimB;
     if (mChainToneStacks[ci] != nullptr)
     {
       mChainToneStacks[ci]->SetParam("bass", bass);
@@ -1138,11 +1109,11 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
       mChainToneStacks[ci]->SetParam("treble", treble);
     }
     SetChainTone(ci, modelPath.Get(), irPath.Get(), tonePath.Get());
-    if (isV4 || isV5)
+    if (isV4 || isV5 || isV6)
       StageUnitBTone(ci + 1, modelBPath.Get(), irBPath.Get(), toneBPath.Get());
   }
   // V3: the loaded rig preset path
-  if (isV3 || isV4 || isV5)
+  if (isV3 || isV4 || isV5 || isV6)
   {
     WDL_String rigRel;
     const int p2 = chunk.GetStr(rigRel, pos);
@@ -1153,7 +1124,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     }
   }
   // V4: the main unit's Tone Morph B tone + morph amount
-  if (isV4 || isV5)
+  if (isV4 || isV5 || isV6)
   {
     WDL_String namB, irB, toneB;
     double mainMorph = 0.0;
@@ -1181,7 +1152,7 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
     }
   }
   // V5: instant double-track state (final output stage)
-  if (isV5)
+  if (isV5 || isV6)
   {
     int dtActive = 0, dtBassCenter = 0;
     int p4 = chunk.Get(&dtActive, pos);
@@ -1195,6 +1166,24 @@ int NeuralAmpModeler::_UnserializeChain(const iplug::IByteChunk& chunk, int star
       pos = p4;
       mDoubleTrackActive = dtActive != 0;
       mDoubleTrackBassCenter = dtBassCenter != 0;
+    }
+  }
+  // V6: the main unit's per-tone model quality. Applied to the models once
+  // they've finished staging (see _ApplySlimParamToLoadedNAMs).
+  if (isV6)
+  {
+    double mainSlimA = 1.0, mainSlimB = 1.0;
+    int p5 = chunk.Get(&mainSlimA, pos);
+    if (p5 > 0)
+    {
+      pos = p5;
+      p5 = chunk.Get(&mainSlimB, pos);
+    }
+    if (p5 > 0)
+    {
+      pos = p5;
+      mMainSlimA = mainSlimA;
+      mMainSlimB = mainSlimB;
     }
   }
   return pos;
@@ -1296,7 +1285,6 @@ void NeuralAmpModeler::OnParamChange(int paramIdx)
     case kToneBass: mToneStack->SetParam("bass", GetParam(paramIdx)->Value()); break;
     case kToneMid: mToneStack->SetParam("middle", GetParam(paramIdx)->Value()); break;
     case kToneTreble: mToneStack->SetParam("treble", GetParam(paramIdx)->Value()); break;
-    case kSlim: _ApplySlimParamToLoadedNAMs(); break;
     default: break;
   }
 }
@@ -1686,27 +1674,32 @@ void NeuralAmpModeler::_SetOutputGain()
   mOutputGain = DBToAmp(gainDB);
 }
 
+// Push every tone's own stored quality onto its loaded/staged model. Used after
+// a state restore, where the models and the stored values arrive separately.
 void NeuralAmpModeler::_ApplySlimParamToLoadedNAMs()
 {
-  const double v = GetParam(kSlim)->Value();
-  auto apply = [v](ResamplingNAM* p) {
+  auto apply = [](ResamplingNAM* p, double v) {
     if (p == nullptr)
       return;
     if (nam::SlimmableModel* s = p->GetSlimmableModel())
       s->SetSlimmableSize(v);
   };
-  apply(mModel.get());
-  apply(mStagedModel.get());
-  // Tone Morph: the main unit's B model too
-  apply(mModelB.get());
-  apply(mStagedModelB.get());
-  // Tone Gallery fork: chain models too
+  const double mainA = mMainSlimA.load();
+  const double mainB = mMainSlimB.load();
+  apply(mModel.get(), mainA);
+  apply(mStagedModel.get(), mainA);
+  // Tone Morph: the main unit's B model has its own quality
+  apply(mModelB.get(), mainB);
+  apply(mStagedModelB.get(), mainB);
+  // Tone Gallery fork: each chain slot's A and B likewise
   for (int ci = 0; ci < kNumChainSlots; ci++)
   {
-    apply(mChainSlots[ci].model.get());
-    apply(mChainSlots[ci].stagedModel.get());
-    apply(mChainSlots[ci].modelB.get());
-    apply(mChainSlots[ci].stagedModelB.get());
+    const double a = mChainSlots[ci].slimA.load();
+    const double b = mChainSlots[ci].slimB.load();
+    apply(mChainSlots[ci].model.get(), a);
+    apply(mChainSlots[ci].stagedModel.get(), a);
+    apply(mChainSlots[ci].modelB.get(), b);
+    apply(mChainSlots[ci].stagedModelB.get(), b);
   }
 }
 
@@ -1733,7 +1726,7 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath)
     temp->Reset(GetSampleRate(), GetBlockSize());
     if (nam::SlimmableModel* slimmable = temp->GetSlimmableModel())
     {
-      slimmable->SetSlimmableSize(GetParam(kSlim)->Value());
+      slimmable->SetSlimmableSize(mMainSlimA.load());
     }
     mStagedModel = std::move(temp);
     mNAMPath = modelPath;
@@ -1815,7 +1808,7 @@ void NeuralAmpModeler::_StageChainModel(int slot, const char* modelPath)
     std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
     temp->Reset(GetSampleRate(), GetBlockSize());
     if (nam::SlimmableModel* slimmable = temp->GetSlimmableModel())
-      slimmable->SetSlimmableSize(GetParam(kSlim)->Value());
+      slimmable->SetSlimmableSize(cs.slimA.load());
     cs.stagedModel = std::move(temp);
     cs.modelPath.Set(modelPath);
   }
@@ -1892,7 +1885,7 @@ std::string NeuralAmpModeler::_StageModelB(const WDL_String& modelPath)
     std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
     temp->Reset(GetSampleRate(), GetBlockSize());
     if (nam::SlimmableModel* slimmable = temp->GetSlimmableModel())
-      slimmable->SetSlimmableSize(GetParam(kSlim)->Value());
+      slimmable->SetSlimmableSize(mMainSlimB.load());
     mStagedModelB = std::move(temp);
     mNAMPathB = modelPath;
   }
@@ -1960,7 +1953,7 @@ void NeuralAmpModeler::_StageChainModelB(int slot, const char* modelPath)
     std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
     temp->Reset(GetSampleRate(), GetBlockSize());
     if (nam::SlimmableModel* slimmable = temp->GetSlimmableModel())
-      slimmable->SetSlimmableSize(GetParam(kSlim)->Value());
+      slimmable->SetSlimmableSize(cs.slimB.load());
     cs.stagedModelB = std::move(temp);
     cs.modelBPath.Set(modelPath);
   }
@@ -2067,6 +2060,63 @@ double NeuralAmpModeler::GetUnitMorph(int unit) const
   if (unit >= 1 && unit <= kNumChainSlots)
     return mChainSlots[unit - 1].morph.load();
   return 0.0;
+}
+
+// --- Per-tone model quality -------------------------------------------------
+// Resolve a unit/side to its live + staged models so a quality change can be
+// pushed to whichever one is currently in play.
+void NeuralAmpModeler::SetUnitSlim(int unit, bool isB, double amt01)
+{
+  const double v = std::clamp(amt01, 0.0, 1.0);
+  std::atomic<double>* pStore = nullptr;
+  ResamplingNAM* live = nullptr;
+  ResamplingNAM* staged = nullptr;
+  if (unit == 0)
+  {
+    pStore = isB ? &mMainSlimB : &mMainSlimA;
+    live = isB ? mModelB.get() : mModel.get();
+    staged = isB ? mStagedModelB.get() : mStagedModel.get();
+  }
+  else if (unit >= 1 && unit <= kNumChainSlots)
+  {
+    ChainSlot& cs = mChainSlots[unit - 1];
+    pStore = isB ? &cs.slimB : &cs.slimA;
+    live = isB ? cs.modelB.get() : cs.model.get();
+    staged = isB ? cs.stagedModelB.get() : cs.stagedModel.get();
+  }
+  else
+    return;
+
+  pStore->store(v);
+  // Not real-time safe (takes a lock + resets the incoming sub-model), so this
+  // is only ever called from the UI thread.
+  auto apply = [v](ResamplingNAM* p) {
+    if (p == nullptr)
+      return;
+    if (nam::SlimmableModel* s = p->GetSlimmableModel())
+      s->SetSlimmableSize(v);
+  };
+  apply(live);
+  apply(staged);
+}
+
+double NeuralAmpModeler::GetUnitSlim(int unit, bool isB) const
+{
+  if (unit == 0)
+    return isB ? mMainSlimB.load() : mMainSlimA.load();
+  if (unit >= 1 && unit <= kNumChainSlots)
+    return isB ? mChainSlots[unit - 1].slimB.load() : mChainSlots[unit - 1].slimA.load();
+  return 1.0;
+}
+
+bool NeuralAmpModeler::UnitToneIsSlimmable(int unit, bool isB) const
+{
+  const ResamplingNAM* p = nullptr;
+  if (unit == 0)
+    p = isB ? mModelB.get() : mModel.get();
+  else if (unit >= 1 && unit <= kNumChainSlots)
+    p = isB ? mChainSlots[unit - 1].modelB.get() : mChainSlots[unit - 1].model.get();
+  return p != nullptr && const_cast<ResamplingNAM*>(p)->GetSlimmableModel() != nullptr;
 }
 
 bool NeuralAmpModeler::UnitHasB(int unit) const
@@ -2688,13 +2738,6 @@ void NeuralAmpModeler::_UpdateControlsFromModel()
       c->SetCalibratedDisable(!mModel->HasOutputLevel());
     }
 
-    if (auto* pSlimIcon = pGraphics->GetControlWithTag(kCtrlTagSlimmableIcon))
-    {
-      // Stay visible; just dim when this model can't be slimmed.
-      const bool slimmable = mModel->GetSlimmableModel() != nullptr;
-      pSlimIcon->Hide(false);
-      pSlimIcon->SetDisabled(!slimmable);
-    }
   }
 }
 

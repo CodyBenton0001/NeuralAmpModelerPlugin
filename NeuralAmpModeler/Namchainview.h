@@ -261,6 +261,15 @@ public:
   IRECT ACardRect() const { return mRECT.GetGridCell(0, 0, 1, 2).GetPadded(-3.0f); }
   IRECT BCardRect() const { return mRECT.GetGridCell(0, 1, 1, 2).GetPadded(-3.0f); }
 
+  // Per-tone QUALITY slider: a short horizontal track on the card's right side.
+  static IRECT QualityRect(const IRECT& card)
+  {
+    const float w = 74.0f;
+    return IRECT(card.R - w - 10.0f, card.MH() - 3.0f, card.R - 10.0f, card.MH() + 3.0f);
+  }
+  // A slightly taller band for hit-testing so the thin track is easy to grab.
+  static IRECT QualityHitRect(const IRECT& card) { return QualityRect(card).GetVPadded(9.0f); }
+
   void Draw(IGraphics& g) override
   {
     const IColor accent = namtheme::Accent();
@@ -304,6 +313,24 @@ public:
       g.PathClipRegion();
     }
     g.DrawRect(active ? accent : namtheme::Line(), card, nullptr, active ? 2.0f : 1.0f);
+
+    // Per-tone QUALITY slider (selects the model's slimmable sub-model).
+    // Dimmed when this tone has no model, or one that can't be slimmed.
+    {
+      const bool canSlim = PLUG()->UnitToneIsSlimmable(unit, isB);
+      const double q = PLUG()->GetUnitSlim(unit, isB);
+      const IRECT track = QualityRect(card);
+      const IColor trackCol = canSlim ? accent.WithOpacity(0.25f) : namtheme::TEXT_FAINT.WithOpacity(0.35f);
+      const IColor fillCol = canSlim ? accent : namtheme::TEXT_FAINT.WithOpacity(0.5f);
+      g.FillRect(trackCol, track);
+      g.FillRect(fillCol, IRECT(track.L, track.T, track.L + (float)q * track.W(), track.B));
+      // Handle
+      const float hx = track.L + (float)q * track.W();
+      g.FillRect(fillCol, IRECT(hx - 2.0f, track.T - 4.0f, hx + 2.0f, track.B + 4.0f));
+      const IText qLabel(6.5f, canSlim ? namtheme::TEXT_DIM : namtheme::TEXT_FAINT, namtheme::kFontMono,
+                         EAlign::Near, EVAlign::Middle);
+      g.DrawText(qLabel, "QUALITY", IRECT(track.L, track.T - 13.0f, track.R, track.T - 3.0f));
+    }
 
     const IRECT labelRow = card.GetFromTop(16.0f).GetReducedFromLeft(8.0f).GetReducedFromTop(3.0f);
     const IText labelText(
@@ -372,11 +399,33 @@ public:
     }
   }
 
+  // Drag the QUALITY track: -1 = not dragging, 0 = A side, 1 = B side.
+  void SetQualityFromX(bool isB, float x)
+  {
+    const IRECT track = QualityRect(isB ? BCardRect() : ACardRect());
+    const double q = std::clamp((double)((x - track.L) / std::max(1.0f, track.W())), 0.0, 1.0);
+    PLUG()->SetUnitSlim(FocusUnit(), isB, q);
+    GetUI()->SetAllControlsDirty();
+  }
+
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
+    // The quality sliders take priority over selecting the tone, so dragging
+    // one doesn't also switch which side the browser is targeting.
+    const int unit = FocusUnit();
+    for (int side = 0; side < 2; side++)
+    {
+      const bool isB = side == 1;
+      const IRECT card = isB ? BCardRect() : ACardRect();
+      if (QualityHitRect(card).Contains(x, y) && PLUG()->UnitToneIsSlimmable(unit, isB))
+      {
+        mDragQuality = side;
+        SetQualityFromX(isB, x);
+        return;
+      }
+    }
     if (BCardRect().Contains(x, y))
     {
-      const int unit = FocusUnit();
       if (PLUG()->UnitHasB(unit) && BCardRect().GetFromTRHC(18.0f, 18.0f).Contains(x, y))
       {
         PLUG()->ClearUnitB(unit);
@@ -394,6 +443,14 @@ public:
       return;
     }
   }
+
+  void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
+  {
+    if (mDragQuality >= 0)
+      SetQualityFromX(mDragQuality == 1, x);
+  }
+
+  void OnMouseUp(float x, float y, const IMouseMod& mod) override { mDragQuality = -1; }
 
   const tonegallery::ToneEntry* ResolveA(int unit)
   {
@@ -451,6 +508,7 @@ public:
 
 private:
   IBitmap mTexture;
+  int mDragQuality = -1; // -1 none, 0 = A side, 1 = B side
   tonegallery::ToneEntry mMainEntry;
   bool mHasMainEntry = false;
   tonegallery::ToneEntry mCache[2];
@@ -521,6 +579,15 @@ public:
       g.FillRect(namtheme::BG, mRECT.GetReducedFromTop(used));
   }
 
+  // Set a unit's per-tone quality from an x position on its slider track.
+  void SetUnitQualityFromX(int unit, bool isB, float x)
+  {
+    const IRECT track = UnitQualityRect(unit, isB);
+    const double q = std::clamp((double)((x - track.L) / std::max(1.0f, track.W())), 0.0, 1.0);
+    PLUG()->SetUnitSlim(unit, isB, q);
+    SetDirty(false);
+  }
+
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
     if (ExpandRect().Contains(x, y))
@@ -530,6 +597,24 @@ public:
       Hide(true);
       GetUI()->Resize(PLUG_WIDTH, PLUG_HEIGHT, GetUI()->GetDrawScale());
       return;
+    }
+    // Per-tone QUALITY sliders -- checked before the unit's choose/clear
+    // regions so dragging one doesn't also open the tone picker.
+    for (int i = 0; i < kNumUnits; i++)
+    {
+      for (int side = 0; side < 2; side++)
+      {
+        const bool isB = side == 1;
+        if (isB && !PLUG()->UnitHasB(i))
+          continue;
+        if (UnitQualityHitRect(i, isB).Contains(x, y) && PLUG()->UnitToneIsSlimmable(i, isB))
+        {
+          mDragQualityUnit = i;
+          mDragQualityIsB = isB;
+          SetUnitQualityFromX(i, isB, x);
+          return;
+        }
+      }
     }
     // --- Preset bar ---
     if (PrevRect().Contains(x, y))
@@ -671,6 +756,11 @@ public:
 
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
   {
+    if (mDragQualityUnit >= 0)
+    {
+      SetUnitQualityFromX(mDragQualityUnit, mDragQualityIsB, x);
+      return;
+    }
     if (mDragMorphUnit >= 0)
     {
       const double next = std::max(0.0, std::min(1.0, PLUG()->GetUnitMorph(mDragMorphUnit) - (double)dY * 0.01));
@@ -689,6 +779,7 @@ public:
   {
     mDragUnit = -1;
     mDragMorphUnit = -1;
+    mDragQualityUnit = -1;
   }
 
   void OnMouseDblClick(float x, float y, const IMouseMod& mod) override
@@ -1160,6 +1251,16 @@ private:
     const IRECT face = UnitRect(i);
     return IRECT(face.R - 210.0f, face.MH() - 24.0f, face.R - 168.0f, face.MH() + 24.0f);
   }
+  // Per-tone QUALITY sliders (A and B), along the bottom of the text block.
+  IRECT UnitQualityRect(int i, bool isB) const
+  {
+    const IRECT face = UnitRect(i);
+    const float w = 88.0f;
+    const float x = face.L + 214.0f + (isB ? (w + 30.0f) : 0.0f);
+    const float y = face.B - 20.0f;
+    return IRECT(x, y - 3.0f, x + w, y + 3.0f);
+  }
+  IRECT UnitQualityHitRect(int i, bool isB) const { return UnitQualityRect(i, isB).GetVPadded(8.0f); }
 
   // --- Per-unit state ------------------------------------------------------
   bool GetUnitEnabled(int i)
@@ -1416,6 +1517,27 @@ private:
       }
     }
 
+    // Per-tone QUALITY sliders (A and B) along the bottom of the text block.
+    for (int side = 0; side < 2; side++)
+    {
+      const bool isB = side == 1;
+      // Only offer a B slider once this unit actually has a B tone.
+      if (isB && !PLUG()->UnitHasB(i))
+        continue;
+      const bool canSlim = PLUG()->UnitToneIsSlimmable(i, isB);
+      const double q = PLUG()->GetUnitSlim(i, isB);
+      const IRECT track = UnitQualityRect(i, isB);
+      const IColor trackCol = canSlim ? accent.WithOpacity(0.25f) : namtheme::TEXT_FAINT.WithOpacity(0.35f);
+      const IColor fillCol = canSlim ? accent : namtheme::TEXT_FAINT.WithOpacity(0.5f);
+      g.FillRect(trackCol, track);
+      g.FillRect(fillCol, IRECT(track.L, track.T, track.L + (float)q * track.W(), track.B));
+      const float hx = track.L + (float)q * track.W();
+      g.FillRect(fillCol, IRECT(hx - 2.0f, track.T - 4.0f, hx + 2.0f, track.B + 4.0f));
+      const IText qLabel(6.5f, canSlim ? namtheme::TEXT_DIM : namtheme::TEXT_FAINT, namtheme::kFontMono, EAlign::Near,
+                         EVAlign::Middle);
+      g.DrawText(qLabel, isB ? "B QUALITY" : "A QUALITY", IRECT(track.L, track.T - 12.0f, track.R, track.T - 2.0f));
+    }
+
     // Level knob
     const IRECT knob = KnobRect(i);
     const float cx = knob.MW();
@@ -1541,6 +1663,8 @@ private:
   std::map<std::string, IBitmap> mImageCache;
   int mDragUnit = -1;
   int mDragMorphUnit = -1;
+  int mDragQualityUnit = -1; // unit whose QUALITY slider is being dragged
+  bool mDragQualityIsB = false;
   // Rig preset bar state
   ERigEntry mRigEntryMode = ERigEntry::None;
   IPopupMenu mRigMenu;
