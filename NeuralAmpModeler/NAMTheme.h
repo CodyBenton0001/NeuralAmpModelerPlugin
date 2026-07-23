@@ -342,10 +342,10 @@ void Draw(IGraphics& g) override
 const IColor accent = namtheme::Accent();
 // Beside layout: Z sigil logo to the LEFT of the AMPRYX wordmark; the subtitle
 // sits under the wordmark, left-aligned with it. The whole block is centred.
-const float sig = 58.0f;
-const float gap = 16.0f;
-IText mark(30.0f, namtheme::TEXT_MAIN, namtheme::kFontWordmark, EAlign::Near, EVAlign::Middle);
-const float markW = SpacedTextWidth(g, "AMPRYX", mark, 6.0f);
+const float sig = 48.0f;
+const float gap = 14.0f;
+IText mark(28.0f, namtheme::TEXT_MAIN, namtheme::kFontWordmark, EAlign::Near, EVAlign::Middle);
+const float markW = SpacedTextWidth(g, "AMPRYX", mark, 4.0f);
 const float blockW = sig + gap + markW;
 const float x0 = mRECT.MW() - 0.5f * blockW;
 
@@ -353,12 +353,12 @@ const IRECT sigBox(x0, mRECT.MH() - 0.5f * sig, x0 + sig, mRECT.MH() + 0.5f * si
 DrawSigil(g, sigBox, accent);
 
 const float tx = sigBox.R + gap;
-const float wordTop = mRECT.MH() - 21.0f, wordBot = mRECT.MH() + 5.0f;
+const float wordTop = mRECT.MH() - 20.0f, wordBot = mRECT.MH() + 5.0f;
 // Subtle chromatic-split shadow, then the wordmark.
 IText markL = mark;
 markL.mFGColor = accent.WithOpacity(0.30f);
-DrawSpacedText(g, "AMPRYX", markL, tx - 1.5f, wordTop, wordBot, 6.0f);
-DrawSpacedText(g, "AMPRYX", mark, tx, wordTop, wordBot, 6.0f);
+DrawSpacedText(g, "AMPRYX", markL, tx - 1.5f, wordTop, wordBot, 4.0f);
+DrawSpacedText(g, "AMPRYX", mark, tx, wordTop, wordBot, 4.0f);
 
 IText sub(8.0f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
 DrawSpacedText(g, "NEURAL AMP MODELER", sub, tx, wordBot - 1.0f, wordBot + 12.0f, 4.0f);

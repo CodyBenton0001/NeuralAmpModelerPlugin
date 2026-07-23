@@ -243,12 +243,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto outputMeterArea =
       IRECT(knobPanelRect.R + 8.0f, knobPanelRect.T, knobPanelRect.R + 26.0f, knobPanelRect.B);
 
-    // AMPRYX header buttons: square TONE3000 (left) + SIGNAL CHAIN (right),
-    // vertically centred on the logo row.
-    const float kHdrBtnH = 48.0f;
-    const IRECT t3kButtonArea(contentArea.L, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.L + 178.0f,
+    // AMPRYX header buttons: compact square TONE3000 (left) + SIGNAL CHAIN
+    // (right), vertically centred on the logo row (kept clear of the centre
+    // logo, which spans ~220px of the ~540px content width).
+    const float kHdrBtnH = 44.0f;
+    const IRECT t3kButtonArea(contentArea.L, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.L + 130.0f,
                               titleArea.MH() + 0.5f * kHdrBtnH);
-    const IRECT chainButtonArea(contentArea.R - 192.0f, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.R,
+    const IRECT chainButtonArea(contentArea.R - 148.0f, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.R,
                                 titleArea.MH() + 0.5f * kHdrBtnH);
 
     // Model loader button
