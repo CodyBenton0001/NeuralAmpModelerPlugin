@@ -230,7 +230,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float spanL = knobsArea.L - 4.0f;
     const float spanR = knobsArea.R + 4.0f;
     const auto morphCardsArea = IRECT(spanL, toggleBar.B + 10.0f, spanR, toggleBar.B + 66.0f);
-    const auto irArea = IRECT(spanL, morphCardsArea.B + 10.0f, spanR - 34.0f, morphCardsArea.B + 44.0f);
+    const auto irArea = IRECT(spanL, morphCardsArea.B + 10.0f, spanR, morphCardsArea.B + 44.0f);
+    // The IR bypass switch control is attached hidden (no icon in the AMPRYX
+    // skin); the kIRToggle parameter stays functional for host automation.
     const auto irSwitchArea = IRECT(spanR - 26.0f, irArea.MH() - 9.0f, spanR - 8.0f, irArea.MH() + 9.0f);
     // Hidden legacy model browser keeps a rect stacked above the IR row.
     const auto modelArea = irArea.GetVShifted(-38.0f);
@@ -440,7 +442,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->SetAnimationEndActionFunction(showSlimOverlay)
       ->Hide(true);
 
-    pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle));
+    pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle))
+      ->Hide(true); // AMPRYX skin: no bypass icon; the parameter remains automatable
     pGraphics->AttachControl(
       new ThemedFileBrowserControl(irArea, kMsgTagClearIR, defaultIRString.c_str(), "wav", loadIRCompletionHandler,
                                    style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG, fileBackgroundBitmap,

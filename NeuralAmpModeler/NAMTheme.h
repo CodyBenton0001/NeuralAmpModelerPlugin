@@ -502,10 +502,9 @@ bitmap, globeSVG, getButtonLabel, getButtonURL)
 
 void Draw(IGraphics& g) override
 {
-// AMPRYX: square row, near-black fill, thin gold border.
-const IRECT card = mRECT.GetPadded(-1.0f);
-g.FillRect(namtheme::PANEL2, card);
-g.DrawRect(mAccent.WithOpacity(0.55f), card, nullptr, 1.0f);
+// AMPRYX: square row, near-black fill, solid 2px gold border (per the mock).
+g.FillRect(namtheme::PANEL2, mRECT);
+g.DrawRect(mAccent, mRECT.GetPadded(-1.0f), nullptr, 2.0f);
 }
 
 private:
