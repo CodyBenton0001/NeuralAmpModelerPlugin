@@ -165,30 +165,18 @@ mIgnoreMouse = true;
 
 void Draw(IGraphics& g) override
 {
-// Rebuild the cached layer when the accent changes, so the colour picker
-// re-tints the grid too (the layer would otherwise keep the old colour).
-const IColor a = namtheme::Accent();
-const bool accentChanged = (a.R != mCachedAccent.R || a.G != mCachedAccent.G || a.B != mCachedAccent.B);
-if (!g.CheckLayer(mLayer) || accentChanged)
-{
-g.StartLayer(this, mRECT);
-const IColor dot = a.WithOpacity(mOpacity);
+// Drawn live rather than cached to an ILayer: re-blitting an offscreen layer
+// inside NanoVG's per-control scissor left faint seams at control boundaries
+// during repaints. The dots are cheap enough to paint directly.
+const IColor dot = namtheme::Accent().WithOpacity(mOpacity);
 for (float y = mRECT.T + 1.0f; y < mRECT.B; y += mPitch)
 for (float x = mRECT.L + 1.0f; x < mRECT.R; x += mPitch)
 g.FillRect(dot, IRECT(x, y, x + 1.0f, y + 1.0f));
-mLayer = g.EndLayer();
-mCachedAccent = a;
 }
-g.DrawLayer(mLayer);
-}
-
-void OnResize() override { mLayer = nullptr; }
 
 private:
 float mPitch;
 float mOpacity;
-ILayerPtr mLayer;
-IColor mCachedAccent = COLOR_TRANSPARENT;
 };
 
 // Halftone-engraving background texture (AsciiHero / AsciiToneA). Draws the
@@ -215,23 +203,11 @@ void Draw(IGraphics& g) override
 {
 if (mBitmap.W() <= 0 || mBitmap.H() <= 0)
 return;
-// Composite the whole texture stack ONCE into a cached layer, then blit it.
-// Drawn live, its four translucent passes (bitmap + black lift + gold wash +
-// vignette) get re-composited per dirty rect; the controls above tile on
-// fractional pixel boundaries, so the shared edges were being covered twice
-// and showed up as faint vertical seams between the knobs.
-const IColor a = namtheme::Accent();
-const bool accentChanged = (a.R != mCachedAccent.R || a.G != mCachedAccent.G || a.B != mCachedAccent.B);
-if (g.CheckLayer(mLayer) && !accentChanged)
-{
-g.DrawLayer(mLayer);
-return;
-}
-g.StartLayer(this, mRECT);
-// Opaque base FIRST so the finished layer is fully opaque. A translucent
-// layer composites over whatever is already on screen, so a partial repaint
-// (e.g. hovering one knob) produces different pixels than the initial full
-// paint -- which showed up as seams at the knob rect edges.
+// Drawn live (no cached layer) and starting from an opaque base. Caching to
+// an ILayer meant re-blitting an offscreen texture inside NanoVG's per-control
+// scissor, whose antialiased edges left faint seams at the control boundaries
+// whenever redraws were firing (i.e. while the mouse moved). Painting the
+// passes directly, over an opaque fill, keeps every frame identical.
 g.FillRect(namtheme::PANEL2, mRECT);
 // Cover-fit the bitmap inside mRECT.
 const float bmpAspect = (float)mBitmap.W() / (float)mBitmap.H();
@@ -269,13 +245,7 @@ g.PathRect(mRECT);
 g.PathFill(IPattern::CreateRadialGradient(mRECT.MW(), mRECT.MH(), 0.75f * mRECT.W(),
 {{COLOR_TRANSPARENT, 0.35f}, {namtheme::PANEL2.WithOpacity(0.85f), 1.0f}}));
 g.PathClipRegion();
-
-mLayer = g.EndLayer();
-mCachedAccent = a;
-g.DrawLayer(mLayer);
 }
-
-void OnResize() override { mLayer = nullptr; }
 
 private:
 static IBlend& BlendAdd()
@@ -287,8 +257,6 @@ IBitmap mBitmap;
 float mOpacity;
 bool mFlip;
 float mVBias;
-ILayerPtr mLayer;
-IColor mCachedAccent = COLOR_TRANSPARENT;
 };
 
 // AMPRYX window frame: the 2px gold border around the whole plugin (mock).
