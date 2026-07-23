@@ -472,8 +472,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // SIGNAL CHAIN button that stays in the header.
     pGraphics->AttachControl(
       new AmpryxUtilityBarControl(utilityBarArea, "AMPRYX  \xC2\xB7  NIGHTFALL  v3.0"));
-    const float ubStep = 28.0f;
-    const auto ubGearArea = utilityBarArea.GetFromRight(34.0f).GetCentredInside(24.0f);
+    const float ubStep = 24.0f;
+    const auto ubGearArea = utilityBarArea.GetFromRight(30.0f).GetCentredInside(15.0f);
     const auto ubAccentArea = ubGearArea.GetTranslated(-ubStep, 0.0f);
     const auto ubRackArea = ubAccentArea.GetTranslated(-ubStep, 0.0f);
     const auto ubZoomArea = ubRackArea.GetTranslated(-ubStep, 0.0f);

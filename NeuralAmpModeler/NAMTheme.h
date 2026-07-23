@@ -48,6 +48,16 @@ const char* const kFontMonoBold = "JetBrainsMono-Bold";
 const char* const kFontDisplay = "ArchivoBlack";
 const char* const kFontWordmark = "Archivo-Bold"; // AMPRYX wordmark (spaced bold)
 
+// Length in bytes of the UTF-8 code point starting at str[i] (so multi-byte
+// glyphs like "\xC2\xB7" are kept whole when we place glyphs individually).
+inline int Utf8CharLen(const char* str, int i, int n)
+{
+int len = 1;
+while (i + len < n && ((unsigned char)str[i + len] & 0xC0) == 0x80)
+len++;
+return len;
+}
+
 // Measure the width of a string drawn with fixed extra letter-spacing.
 inline float SpacedTextWidth(IGraphics& g, const char* str, IText text, float spacing)
 {
@@ -55,12 +65,16 @@ const int n = (int)strlen(str);
 IText m = text;
 m.mAlign = EAlign::Near;
 float total = 0.0f;
-for (int i = 0; i < n && i < 96; i++)
+for (int i = 0; i < n;)
 {
-char c[2] = {str[i], 0};
+const int len = Utf8CharLen(str, i, n);
+char c[8] = {0};
+for (int k = 0; k < len && k < 7; k++)
+c[k] = str[i + k];
 IRECT r;
 g.MeasureText(m, c, r);
 total += r.W() + (i > 0 ? spacing : 0.0f);
+i += len;
 }
 return total;
 }
@@ -74,13 +88,17 @@ const int n = (int)strlen(str);
 IText m = text;
 m.mAlign = EAlign::Near;
 float x = startX;
-for (int i = 0; i < n && i < 96; i++)
+for (int i = 0; i < n;)
 {
-char c[2] = {str[i], 0};
+const int len = Utf8CharLen(str, i, n);
+char c[8] = {0};
+for (int k = 0; k < len && k < 7; k++)
+c[k] = str[i + k];
 IRECT r;
 g.MeasureText(m, c, r);
 g.DrawText(m, c, IRECT(x, top, x + r.W() + 6.0f, bottom));
 x += r.W() + spacing;
+i += len;
 }
 }
 } // namespace namtheme
@@ -485,7 +503,7 @@ void Draw(IGraphics& g) override
 if (mMouseIsOver)
 g.FillEllipse(PluginColors::MOUSEOVER, mRECT);
 // AMPRYX footer: a clean solid accent dot (no ring).
-g.FillEllipse(namtheme::Accent(), mRECT.GetCentredInside(13.0f));
+g.FillEllipse(namtheme::Accent(), mRECT.GetCentredInside(10.0f));
 }
 
 void OnMouseDown(float x, float y, const IMouseMod& mod) override
@@ -808,14 +826,14 @@ void Draw(IGraphics& g) override
 if (mMouseIsOver)
 g.FillRoundRect(PluginColors::MOUSEOVER, mRECT, 4.0f);
 const IColor c = mMouseIsOver ? COLOR_WHITE : namtheme::TEXT_DIM;
-const IRECT icon = mRECT.GetCentredInside(13.0f);
+const IRECT icon = mRECT.GetCentredInside(10.0f);
 // Two outward arrows (expand)
-g.DrawLine(c, icon.L, icon.T + 4.0f, icon.L, icon.T, nullptr, 1.4f);
-g.DrawLine(c, icon.L, icon.T, icon.L + 4.0f, icon.T, nullptr, 1.4f);
-g.DrawLine(c, icon.L, icon.T, icon.L + 5.0f, icon.T + 5.0f, nullptr, 1.4f);
-g.DrawLine(c, icon.R - 4.0f, icon.B, icon.R, icon.B, nullptr, 1.4f);
-g.DrawLine(c, icon.R, icon.B - 4.0f, icon.R, icon.B, nullptr, 1.4f);
-g.DrawLine(c, icon.R - 5.0f, icon.B - 5.0f, icon.R, icon.B, nullptr, 1.4f);
+g.DrawLine(c, icon.L, icon.T + 3.0f, icon.L, icon.T, nullptr, 1.1f);
+g.DrawLine(c, icon.L, icon.T, icon.L + 3.0f, icon.T, nullptr, 1.1f);
+g.DrawLine(c, icon.L, icon.T, icon.L + 4.0f, icon.T + 4.0f, nullptr, 1.1f);
+g.DrawLine(c, icon.R - 3.0f, icon.B, icon.R, icon.B, nullptr, 1.1f);
+g.DrawLine(c, icon.R, icon.B - 3.0f, icon.R, icon.B, nullptr, 1.1f);
+g.DrawLine(c, icon.R - 4.0f, icon.B - 4.0f, icon.R, icon.B, nullptr, 1.1f);
 }
 
 void OnMouseDown(float x, float y, const IMouseMod& mod) override
@@ -863,10 +881,10 @@ void Draw(IGraphics& g) override
 {
 if (mMouseIsOver)
 g.FillRoundRect(PluginColors::MOUSEOVER, mRECT, 4.0f);
-const IRECT icon = mRECT.GetCentredInside(14.0f, 12.0f);
+const IRECT icon = mRECT.GetCentredInside(12.0f, 9.0f);
 const IColor c = namtheme::TEXT_DIM;
-g.DrawRoundRect(c, icon, 2.0f, nullptr, 1.4f);
-g.DrawLine(c, icon.L + 2.0f, icon.MH(), icon.R - 2.0f, icon.MH(), nullptr, 1.2f);
+g.DrawRoundRect(c, icon, 2.0f, nullptr, 1.1f);
+g.DrawLine(c, icon.L + 2.5f, icon.MH(), icon.R - 2.5f, icon.MH(), nullptr, 1.1f);
 }
 
 void OnMouseDown(float x, float y, const IMouseMod& mod) override
