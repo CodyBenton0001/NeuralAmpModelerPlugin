@@ -393,6 +393,16 @@ ThemedKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IV
 mInnerPointerFrac = 0.62f;
 }
 
+// Skip IVKnobControl's DrawBackground: nothing should paint a per-cell rect
+// over the panel texture (any translucent fill shows as a seam where the
+// cells meet).
+void Draw(IGraphics& g) override
+{
+DrawLabel(g);
+DrawWidget(g);
+DrawValue(g, false);
+}
+
 void DrawWidget(IGraphics& g) override
 {
 const float widgetRadius = GetRadius() * 0.85f;

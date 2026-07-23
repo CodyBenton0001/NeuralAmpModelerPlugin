@@ -194,7 +194,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     // Areas for knobs (shifted down past the compact header row).
     const auto knobsPad = 20.0f;
-    const auto singleKnobPad = -2.0f;
+    // 0 (not -2) on purpose: a negative pad EXPANDS each grid cell, so adjacent
+    // knob rects overlapped by 4px. The semi-transparent panel texture beneath
+    // them was composited twice in that strip, which showed up as thin dark
+    // vertical lines between the knobs.
+    const auto singleKnobPad = 0.0f;
     const auto knobsArea = contentArea.GetFromTop(NAM_KNOB_HEIGHT)
                              .GetReducedFromLeft(knobsPad)
                              .GetReducedFromRight(knobsPad)
