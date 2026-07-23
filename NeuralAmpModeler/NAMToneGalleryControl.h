@@ -1756,20 +1756,20 @@ public:
 
   void Draw(IGraphics& g) override
   {
-    // Panel
-    g.FillRect(IColor(255, 23, 24, 28), mRECT);
-    g.FillRect(IColor(18, 255, 255, 255), mRECT.GetFromRight(1.0f));
+    // Panel (AMPRYX: near-black sidebar with a gold hairline edge)
+    g.FillRect(IColor(255, 10, 9, 6), mRECT);
+    g.FillRect(IColor(40, 233, 195, 74), mRECT.GetFromRight(1.0f));
 
-    // Header
+    // Header ("TONE LIBRARY" in Archivo Black, per the mock)
     const IRECT header = mRECT.GetFromTop(kHeaderHeight);
-    const IText titleText(11.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    const IText titleText(13.0f, IColor(255, 236, 230, 212), "ArchivoBlack", EAlign::Near, EVAlign::Middle);
     g.DrawText(titleText, "TONE LIBRARY", header.GetReducedFromLeft(12.0f).GetFromTop(28.0f));
     std::stringstream count;
     if (mFilter == tonegallery::kFilterAll)
       count << mEntries.size() << (mEntries.size() == 1 ? " tone" : " tones");
     else
       count << mFiltered.size() << " of " << mEntries.size() << (mEntries.size() == 1 ? " tone" : " tones");
-    const IText countText(9.0f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Middle);
+    const IText countText(9.0f, IColor(255, 147, 140, 120), "JetBrainsMono-Regular", EAlign::Near, EVAlign::Middle);
     g.DrawText(countText, count.str().c_str(), header.GetReducedFromLeft(12.0f).GetFromBottom(16.0f));
 
     // Refresh icon (circular arrow)
@@ -1781,19 +1781,26 @@ public:
     g.FillTriangle(iconColor, cx + 1.5f, cy - r - 3.0f, cx + 7.5f, cy - r + 0.5f, cx + 1.5f, cy - r + 4.0f);
 
     // Category chips
-    const IText chipTextActive(9.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
-    const IText chipTextInactive(9.0f, PluginColors::NAM_THEMEFONTCOLOR, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    // Category chips (AMPRYX: square, gold when active / faint-gold when not)
+    const IText chipTextActive(9.0f, IColor(255, 11, 10, 7), "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
+    const IText chipTextInactive(9.0f, IColor(255, 201, 194, 174), "JetBrainsMono-Regular", EAlign::Center, EVAlign::Middle);
     for (int i = 0; i < tonegallery::kNumFilters; i++)
     {
       const IRECT chip = ChipRect(i);
       const bool isActive = (i == mFilter);
       const bool isOver = (i == mMouseOverChip);
-      g.FillRoundRect(isActive ? tonegallery::AccentColor() : IColor(13, 255, 255, 255), chip, chip.H() * 0.5f);
+      if (isActive)
+        g.FillRect(tonegallery::AccentColor(), chip);
+      else
+      {
+        g.FillRect(IColor(15, 233, 195, 74), chip);
+        g.DrawRect(IColor(51, 233, 195, 74), chip, nullptr, 1.0f);
+      }
       if (isOver && !isActive)
-        g.FillRoundRect(PluginColors::MOUSEOVER, chip, chip.H() * 0.5f);
+        g.FillRect(PluginColors::MOUSEOVER, chip);
       g.DrawText(isActive ? chipTextActive : chipTextInactive, tonegallery::FilterLabel(i), chip);
     }
-    g.FillRect(IColor(18, 255, 255, 255), mRECT.GetFromTop(kHeaderHeight + kFilterAreaHeight).GetFromBottom(1.0f));
+    g.FillRect(IColor(40, 233, 195, 74), mRECT.GetFromTop(kHeaderHeight + kFilterAreaHeight).GetFromBottom(1.0f));
 
     // Cards
     const IRECT grid = GridArea();
@@ -2035,7 +2042,8 @@ private:
   {
     const IColor gearColor = tonegallery::GearTypeColor(entry.gearType);
 
-    g.FillRoundRect(IColor(255, 32, 33, 41), card, 8.0f);
+    // AMPRYX: square card, mock's #100e09 face.
+    g.FillRect(IColor(255, 16, 14, 9), card);
 
     // Photo (cover-cropped into the top of the card)
     const IRECT photo = card.GetFromTop(kPhotoHeight).GetPadded(-1.5f);
@@ -2060,8 +2068,8 @@ private:
     }
     else
     {
-      g.FillRoundRect(gearColor.WithOpacity(0.15f), photo, 6.0f);
-      const IText initialText(15.0f, gearColor, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.FillRect(gearColor.WithOpacity(0.15f), photo);
+      const IText initialText(15.0f, gearColor, "ArchivoBlack", EAlign::Center, EVAlign::Middle);
       std::string initials;
       initials += entry.name.empty() ? '?' : (char)std::toupper((unsigned char)entry.name[0]);
       g.DrawText(initialText, initials.c_str(), photo);
@@ -2069,7 +2077,7 @@ private:
 
     // Name (up to two lines)
     const IRECT body = card.GetReducedFromTop(kPhotoHeight).GetPadded(-6.0f);
-    const IText nameText(8.5f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Top);
+    const IText nameText(8.5f, IColor(255, 236, 230, 212), "JetBrainsMono-Bold", EAlign::Near, EVAlign::Top);
     std::string n1, n2;
     TwoLines(entry.name, 18, n1, n2);
     g.DrawText(nameText, n1.c_str(), body.GetFromTop(10.0f));
@@ -2077,7 +2085,7 @@ private:
       g.DrawText(nameText, n2.c_str(), body.GetReducedFromTop(10.0f).GetFromTop(10.0f));
 
     // Description (up to two lines)
-    const IText descText(7.5f, IColor(255, 120, 123, 132), "Inter-Regular", EAlign::Near, EVAlign::Top);
+    const IText descText(7.5f, IColor(255, 147, 140, 120), "JetBrainsMono-Regular", EAlign::Near, EVAlign::Top);
     std::string d1, d2;
     TwoLines(entry.description, 21, d1, d2);
     const IRECT descArea = body.GetReducedFromTop(21.0f);
@@ -2090,8 +2098,8 @@ private:
     const char* gearLabel = tonegallery::GearTypeChipLabel(entry.gearType);
     const float gearW = 10.0f + 4.6f * (float)strlen(gearLabel);
     const IRECT gearChip = tagRow.GetFromLeft(gearW);
-    g.FillRoundRect(gearColor, gearChip, 4.0f);
-    const IText gearText(6.5f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    g.FillRect(gearColor, gearChip);
+    const IText gearText(6.5f, IColor(255, 11, 10, 7), "JetBrainsMono-Regular", EAlign::Center, EVAlign::Middle);
     g.DrawText(gearText, gearLabel, gearChip);
     if (!entry.tags.empty())
     {
@@ -2100,8 +2108,8 @@ private:
       IRECT tagChip = tagRow.GetReducedFromLeft(gearW + 4.0f).GetFromLeft(tagW);
       if (tagChip.R <= card.R - 4.0f)
       {
-        g.FillRoundRect(IColor(18, 255, 255, 255), tagChip, 4.0f);
-        const IText tagText(6.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Center, EVAlign::Middle);
+        g.FillRect(IColor(20, 233, 195, 74), tagChip);
+        const IText tagText(6.5f, IColor(255, 147, 140, 120), "JetBrainsMono-Regular", EAlign::Center, EVAlign::Middle);
         g.DrawText(tagText, tag.c_str(), tagChip);
       }
     }
@@ -2110,8 +2118,7 @@ private:
     const bool nowPlaying = !mNowPlayingDir.empty() && entry.directory == mNowPlayingDir;
     if (mouseOver || nowPlaying)
     {
-      g.DrawRoundRect(tonegallery::AccentColor().WithOpacity(0.25f), card.GetPadded(1.0f), 9.0f, nullptr, 3.0f);
-      g.DrawRoundRect(tonegallery::AccentColor(), card, 8.0f, nullptr, nowPlaying ? 1.6f : 1.2f);
+      g.DrawRect(tonegallery::AccentColor(), card.GetPadded(-1.0f), nullptr, nowPlaying ? 2.4f : 1.8f);
       if (nowPlaying)
       {
         const IRECT led = card.GetFromTop(kPhotoHeight).GetFromTRHC(16.0f, 16.0f).GetCentredInside(7.0f);
@@ -2121,7 +2128,7 @@ private:
     }
     else
     {
-      g.DrawRoundRect(IColor(18, 255, 255, 255), card, 8.0f);
+      g.DrawRect(IColor(51, 233, 195, 74), card.GetPadded(-0.5f), nullptr, 1.0f);
     }
   }
 
