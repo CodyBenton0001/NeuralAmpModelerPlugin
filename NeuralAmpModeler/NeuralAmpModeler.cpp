@@ -186,7 +186,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto mainB = rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight + kFavoritesBarHeight);
     const auto mainArea = mainB.GetPadded(-20);
     const auto contentArea = mainArea.GetPadded(-10);
-    const auto titleHeight = 50.0f;
+    // AMPRYX skin: taller header for the stacked centred logo (sigil above the
+    // AMPRYX wordmark above the subtitle).
+    const auto titleHeight = 92.0f;
     const auto titleArea = contentArea.GetFromTop(titleHeight);
 
     // Areas for knobs
@@ -385,12 +387,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new AmpryxDotGridControl(b));
     const auto knobCardArea = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
     pGraphics->AttachControl(new ThemedCardControl(knobCardArea, namtheme::PANEL2, 0.0f, namtheme::BORDER, 2.0f));
-    pGraphics->AttachControl(new AmpryxTextureControl(knobCardArea.GetPadded(-2.0f), asciiHeroBitmap, 0.5f));
+    pGraphics->AttachControl(new AmpryxTextureControl(knobCardArea.GetPadded(-2.0f), asciiHeroBitmap, 0.4f));
     // The toggle bar's square gold-bordered background (behind the four switches).
     pGraphics->AttachControl(new ThemedCardControl(toggleBar, namtheme::CARD, 0.0f, namtheme::BORDER, 2.0f));
-    // Title, centered between the TONE3000 and SIGNAL CHAIN buttons.
-    pGraphics->AttachControl(
-      new ThemedTitleControl(IRECT(t3kButtonArea.R + 8.0f, titleArea.T, chainButtonArea.L - 8.0f, titleArea.B)));
+    // Stacked logo, centred across the full content width (the TONE3000 and
+    // SIGNAL CHAIN buttons sit at the top corners, drawn on top).
+    pGraphics->AttachControl(new ThemedTitleControl(IRECT(contentArea.L, titleArea.T, contentArea.R, titleArea.B)));
     // Tone Morph: the model box + its icon are hidden; the A/B TONE cards
     // (attached below) take their place above the IR box.
 
@@ -438,7 +440,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(
       new ThemedFileBrowserControl(irArea, kMsgTagClearIR, defaultIRString.c_str(), "wav", loadIRCompletionHandler,
                                    style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG, fileBackgroundBitmap,
-                                   globeSVG, "Get IRs", getUrl, IColor(255, 110, 168, 255)),
+                                   globeSVG, "Get IRs", getUrl, namtheme::Accent()),
       kCtrlTagIRFileBrowser);
     pGraphics->AttachControl(new ThemedSwitchControl(ngToggleArea, kNoiseGateActive, "NOISE GATE", style));
     pGraphics->AttachControl(new ThemedSwitchControl(eqToggleArea, kEQActive, "EQ", style));

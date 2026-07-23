@@ -293,30 +293,22 @@ g.DrawLine(namtheme::BG, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, 1.2f);
 void Draw(IGraphics& g) override
 {
 const IColor accent = namtheme::Accent();
-const float sig = std::min(mRECT.H(), 44.0f);
-const float gap = 12.0f;
-
-// Measure the wordmark so the sigil + wordmark block can be centred together.
-IText mark(26.0f, namtheme::TEXT_MAIN, namtheme::kFontDisplay, EAlign::Near, EVAlign::Middle);
-IRECT mr;
-g.MeasureText(mark, "AMPRYX", mr);
-const float blockW = sig + gap + mr.W();
-const float x0 = mRECT.MW() - 0.5f * blockW;
-
-const IRECT sigBox(x0, mRECT.MH() - 0.5f * sig, x0 + sig, mRECT.MH() + 0.5f * sig);
+// Stacked + centred: Z sigil on top, AMPRYX wordmark below, subtitle below.
+const float sig = 42.0f;
+const IRECT sigBox(mRECT.MW() - 0.5f * sig, mRECT.T, mRECT.MW() + 0.5f * sig, mRECT.T + sig);
 DrawSigil(g, sigBox, accent);
 
-const float tx = sigBox.R + gap;
-// Wordmark with a subtle chromatic-split shadow, like the mock.
+const IRECT wordRect(mRECT.L, sigBox.B + 2.0f, mRECT.R, sigBox.B + 38.0f);
+IText mark(30.0f, namtheme::TEXT_MAIN, namtheme::kFontDisplay, EAlign::Center, EVAlign::Middle);
+// Subtle chromatic-split shadow, like the mock.
 IText markL = mark;
-markL.mFGColor = accent.WithOpacity(0.35f);
-g.DrawText(markL, "AMPRYX", IRECT(tx - 1.5f, mRECT.T - 6.0f, tx + mr.W() + 40.0f, mRECT.B - 6.0f));
-mark.mFGColor = namtheme::TEXT_MAIN;
-g.DrawText(mark, "AMPRYX", IRECT(tx, mRECT.T - 6.0f, tx + mr.W() + 40.0f, mRECT.B - 6.0f));
+markL.mFGColor = accent.WithOpacity(0.30f);
+g.DrawText(markL, "AMPRYX", wordRect.GetHShifted(-1.5f));
+g.DrawText(mark, "AMPRYX", wordRect);
 
-IText sub(7.5f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
-g.DrawText(sub, "NEURAL AMP MODELER  ·  NIGHTFALL",
-IRECT(tx, mRECT.B - 14.0f, tx + mr.W() + 120.0f, mRECT.B));
+IText sub(8.0f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Center, EVAlign::Top);
+g.DrawText(sub, "NEURAL AMP MODELER  \xC2\xB7  NIGHTFALL",
+IRECT(mRECT.L, wordRect.B + 1.0f, mRECT.R, wordRect.B + 13.0f));
 }
 };
 
@@ -377,16 +369,18 @@ style.WithShowValue(false).WithDrawFrame(false).WithDrawShadows(false).WithLabel
 void DrawWidget(IGraphics& g) override
 {
 const bool on = GetValue() > 0.5;
-const IRECT pill = mWidgetBounds.GetCentredInside(34.0f, 17.0f);
+// AMPRYX mock: 44x22 pill, gold when on / faint gold when off, with a dark
+// handle when on and a muted handle when off.
+const IRECT pill = mWidgetBounds.GetCentredInside(44.0f, 22.0f);
 const IColor accent = GetColor(kX1);
 
-g.FillRoundRect(on ? accent : IColor(26, 255, 255, 255), pill, pill.H() * 0.5f, &mBlend);
+g.FillRoundRect(on ? accent : IColor(40, 233, 195, 74), pill, pill.H() * 0.5f, &mBlend);
 if (mMouseIsOver)
 g.FillRoundRect(PluginColors::MOUSEOVER, pill, pill.H() * 0.5f, &mBlend);
 
-const float hr = 6.0f;
-const float hx = on ? pill.R - 2.5f - hr : pill.L + 2.5f + hr;
-g.FillCircle(on ? COLOR_WHITE : IColor(255, 130, 130, 138), hx, pill.MH(), hr, &mBlend);
+const float hr = 8.0f;
+const float hx = on ? pill.R - 3.0f - hr : pill.L + 3.0f + hr;
+g.FillCircle(on ? namtheme::BG : namtheme::TEXT_FAINT, hx, pill.MH(), hr, &mBlend);
 }
 };
 

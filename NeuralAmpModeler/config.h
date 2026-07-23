@@ -31,10 +31,10 @@
 // + 56px favorites bar (bottom). Keep these in sync with kSidebarWidth /
 // kFavoritesBarHeight in NAMToneGalleryControl.h.
 #define PLUG_WIDTH 810
-// AMPRYX skin: 456 (stock 600x400 UI + 56px favorites bar) + 74px output scope
-// + 28px utility bar = 558. Keep in sync with kOutputScopeHeight /
-// kUtilityBarHeight in NAMToneGalleryControl.h.
-#define PLUG_HEIGHT 558
+// AMPRYX skin: stock 600x UI (taller for the stacked centred logo) + 72px
+// favorites bar + 74px output scope + 28px utility bar = 620. Keep in sync with
+// the k*Height constants in NAMToneGalleryControl.h.
+#define PLUG_HEIGHT 620
 #define PLUG_FPS 60
 #define PLUG_SHARED_RESOURCES 0
 // Tone Gallery fork: 1 so the rack-view toggle can resize the window in hosts.

@@ -55,7 +55,9 @@ const int kCtrlTagMorphCards = 1009; // NAMChainView.h (main-view A/B tone cards
 // bar under the main UI. The main plugin UI keeps its stock 600x400 size;
 // config.h grows PLUG_WIDTH/PLUG_HEIGHT by these amounts.
 const float kSidebarWidth = 210.0f;
-const float kFavoritesBarHeight = 56.0f;
+// AMPRYX skin: taller favorite channel buttons (two rows: LED + number + tag on
+// top, tone name below) to match the mock. PLUG_HEIGHT grows to match.
+const float kFavoritesBarHeight = 72.0f;
 const float kDetailPanelWidth = 240.0f;
 const float kRackViewHeight = 140.0f;
 // AMPRYX skin: output waveform scope + utility bar stacked below the favorites
