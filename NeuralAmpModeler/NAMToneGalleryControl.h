@@ -1253,8 +1253,8 @@ public:
   void Draw(IGraphics& g) override
   {
     const IColor accent = tonegallery::AccentColor();
-    g.FillRect(IColor(255, 20, 21, 25), mRECT);
-    g.FillRect(accent.WithOpacity(0.3f), mRECT.GetFromRight(1.0f));
+    g.FillRect(IColor(255, 10, 9, 6), mRECT);
+    g.FillRect(accent.WithOpacity(0.4f), mRECT.GetFromRight(1.0f));
     if (!mHasEntry)
       return;
 
@@ -1280,7 +1280,7 @@ public:
       // Fade the bottom of the photo into the panel
       g.PathRect(photo.GetFromBottom(40.0f));
       g.PathFill(IPattern::CreateLinearGradient(
-        photo.L, photo.B - 40.0f, photo.L, photo.B, {{IColor(0, 20, 21, 25), 0.0f}, {IColor(255, 20, 21, 25), 1.0f}}));
+        photo.L, photo.B - 40.0f, photo.L, photo.B, {{IColor(0, 10, 9, 6), 0.0f}, {IColor(255, 10, 9, 6), 1.0f}}));
     }
     else
     {
@@ -1322,11 +1322,11 @@ public:
       const char* gearLabel = tonegallery::GearTypeChipLabel(mEntry.gearType);
       const float gw = 12.0f + 5.0f * (float)strlen(gearLabel);
       const IRECT gearChip(x, y + 2.0f, x + gw, y + 15.0f);
-      g.FillRoundRect(gearColor, gearChip, 4.0f);
-      const IText gearText(7.5f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.FillRect(gearColor, gearChip);
+      const IText gearText(7.5f, IColor(255, 11, 10, 7), "JetBrainsMono-Regular", EAlign::Center, EVAlign::Middle);
       g.DrawText(gearText, gearLabel, gearChip);
       x += gw + 4.0f;
-      const IText tagText(7.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Center, EVAlign::Middle);
+      const IText tagText(7.5f, IColor(255, 147, 140, 120), "JetBrainsMono-Regular", EAlign::Center, EVAlign::Middle);
       for (const auto& tag : mEntry.tags)
       {
         const std::string t = tonegallery::Ellipsize(tag, 14);
@@ -1334,7 +1334,7 @@ public:
         if (x + tw > body.R)
           break;
         const IRECT chip(x, y + 2.0f, x + tw, y + 15.0f);
-        g.FillRoundRect(IColor(18, 255, 255, 255), chip, 4.0f);
+        g.FillRect(IColor(20, 233, 195, 74), chip);
         g.DrawText(tagText, t.c_str(), chip);
         x += tw + 4.0f;
       }
@@ -1344,8 +1344,8 @@ public:
     // LOAD button
     mLoadButtonRect = IRECT(body.L, y, body.R, y + 24.0f);
     const bool overLoad = mMouseOverLoad;
-    g.FillRoundRect(overLoad ? accent : accent.WithOpacity(0.85f), mLoadButtonRect, 12.0f);
-    const IText loadText(11.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    g.FillRect(overLoad ? accent : accent.WithOpacity(0.85f), mLoadButtonRect);
+    const IText loadText(11.0f, IColor(255, 11, 10, 7), "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
     g.DrawText(loadText, "LOAD TONE", mLoadButtonRect);
     y += 32.0f;
 
@@ -1379,8 +1379,9 @@ public:
         const char* seeLabel = mDescExpanded ? "See less" : "See all";
         const float lw = 14.0f + 5.4f * (float)strlen(seeLabel);
         mSeeAllRect = IRECT(body.L, sy, body.L + lw, sy + 15.0f);
-        g.FillRoundRect(accent.WithOpacity(mMouseOverSeeAll ? 0.30f : 0.16f), mSeeAllRect, 4.0f);
-        const IText seeText(8.5f, accent, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+        g.FillRect(accent.WithOpacity(mMouseOverSeeAll ? 0.22f : 0.10f), mSeeAllRect);
+        g.DrawRect(accent.WithOpacity(0.5f), mSeeAllRect, nullptr, 1.0f);
+        const IText seeText(8.5f, accent, "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
         g.DrawText(seeText, seeLabel, mSeeAllRect);
         sy += 19.0f;
       }
@@ -1418,12 +1419,12 @@ public:
       const std::string& path = isIR ? mEntry.irs[i - mEntry.models.size()] : mEntry.models[i];
       const bool nowPlaying = (!isIR && path == mNowPlayingModel) || (isIR && path == mNowPlayingIR);
       if (i == mMouseOverRow)
-        g.FillRoundRect(accent.WithOpacity(0.12f), row, 5.0f);
+        g.FillRect(accent.WithOpacity(0.12f), row);
       // Type chip
-      const IColor typeColor = isIR ? IColor(255, 110, 168, 255) : accent;
+      const IColor typeColor = isIR ? IColor(255, 147, 140, 120) : accent;
       const IRECT typeChip = row.GetFromLeft(24.0f).GetCentredInside(20.0f, 13.0f);
-      g.FillRoundRect(typeColor.WithOpacity(0.2f), typeChip, 3.0f);
-      const IText typeText(7.0f, typeColor, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.FillRect(typeColor.WithOpacity(0.22f), typeChip);
+      const IText typeText(7.0f, typeColor, "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(typeText, isIR ? "IR" : "M", typeChip);
       // Variant name — wraps onto a second line when too long instead of clipping.
       const IRECT textArea = row.GetReducedFromLeft(28.0f).GetReducedFromRight(16.0f);
