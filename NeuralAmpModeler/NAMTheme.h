@@ -215,6 +215,19 @@ void Draw(IGraphics& g) override
 {
 if (mBitmap.W() <= 0 || mBitmap.H() <= 0)
 return;
+// Composite the whole texture stack ONCE into a cached layer, then blit it.
+// Drawn live, its four translucent passes (bitmap + black lift + gold wash +
+// vignette) get re-composited per dirty rect; the controls above tile on
+// fractional pixel boundaries, so the shared edges were being covered twice
+// and showed up as faint vertical seams between the knobs.
+const IColor a = namtheme::Accent();
+const bool accentChanged = (a.R != mCachedAccent.R || a.G != mCachedAccent.G || a.B != mCachedAccent.B);
+if (g.CheckLayer(mLayer) && !accentChanged)
+{
+g.DrawLayer(mLayer);
+return;
+}
+g.StartLayer(this, mRECT);
 // Cover-fit the bitmap inside mRECT.
 const float bmpAspect = (float)mBitmap.W() / (float)mBitmap.H();
 const float areaAspect = mRECT.W() / mRECT.H();
@@ -251,7 +264,13 @@ g.PathRect(mRECT);
 g.PathFill(IPattern::CreateRadialGradient(mRECT.MW(), mRECT.MH(), 0.75f * mRECT.W(),
 {{COLOR_TRANSPARENT, 0.35f}, {namtheme::PANEL2.WithOpacity(0.85f), 1.0f}}));
 g.PathClipRegion();
+
+mLayer = g.EndLayer();
+mCachedAccent = a;
+g.DrawLayer(mLayer);
 }
+
+void OnResize() override { mLayer = nullptr; }
 
 private:
 static IBlend& BlendAdd()
@@ -263,6 +282,8 @@ IBitmap mBitmap;
 float mOpacity;
 bool mFlip;
 float mVBias;
+ILayerPtr mLayer;
+IColor mCachedAccent = COLOR_TRANSPARENT;
 };
 
 // AMPRYX window frame: the 2px gold border around the whole plugin (mock).
