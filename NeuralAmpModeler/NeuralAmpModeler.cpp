@@ -504,7 +504,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // earlier, underneath the tone detail panel).
     pGraphics
       ->AttachControl(
-        new NAMTone3000BrowserControl(mainB, loadModelCompletionHandler, loadIRCompletionHandler), kCtrlTagTone3000)
+        new NAMTone3000BrowserControl(b, loadModelCompletionHandler, loadIRCompletionHandler), kCtrlTagTone3000)
       ->Hide(true);
 
     pGraphics

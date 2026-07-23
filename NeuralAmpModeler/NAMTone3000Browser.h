@@ -940,19 +940,21 @@ public:
   void Draw(IGraphics& g) override
   {
     const IColor accent = tonegallery::AccentColor();
-    g.FillRect(IColor(255, 14, 14, 17), mRECT);
+    // AMPRYX: near-black full-window sheet with a gold frame.
+    g.FillRect(IColor(255, 11, 10, 7), mRECT);
+    g.DrawRect(accent, mRECT.GetPadded(-1.0f), nullptr, 2.0f);
 
     const IRECT content = mRECT.GetPadded(-24.0f);
 
     // Title + close
-    const IText titleText(16.0f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    const IText titleText(16.0f, IColor(255, 236, 230, 212), "ArchivoBlack", EAlign::Near, EVAlign::Middle);
     g.DrawText(titleText, "TONE3000", content.GetFromTop(26.0f));
     IRECT t3kBadge;
     g.MeasureText(titleText, "TONE3000", t3kBadge);
-    const IText liveText(9.0f, accent, "Inter-Bold", EAlign::Near, EVAlign::Middle);
-    g.DrawText(liveText, "LIVE SEARCH", content.GetFromTop(26.0f).GetReducedFromLeft(t3kBadge.W() + 10.0f));
+    const IText liveText(9.0f, accent, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
+    g.DrawText(liveText, "LIVE SEARCH", content.GetFromTop(26.0f).GetReducedFromLeft(t3kBadge.W() + 12.0f));
     const IRECT close = CloseRect();
-    const IColor xColor = mMouseOverClose ? COLOR_WHITE : IColor(255, 170, 173, 182);
+    const IColor xColor = mMouseOverClose ? IColor(255, 236, 230, 212) : accent;
     const IRECT xr = close.GetCentredInside(10.0f);
     g.DrawLine(xColor, xr.L, xr.T, xr.R, xr.B, nullptr, 1.8f);
     g.DrawLine(xColor, xr.L, xr.B, xr.R, xr.T, nullptr, 1.8f);
@@ -968,12 +970,12 @@ public:
 
     // Search field
     const IRECT field = SearchFieldRect();
-    g.FillRoundRect(IColor(255, 32, 33, 41), field, field.H() * 0.5f);
-    g.DrawRoundRect(mMouseOverField ? accent : IColor(18, 255, 255, 255), field, field.H() * 0.5f);
+    g.FillRect(IColor(255, 15, 13, 8), field);
+    g.DrawRect(mMouseOverField ? accent : accent.WithOpacity(0.45f), field, nullptr, mMouseOverField ? 2.0f : 1.0f);
     // magnifier icon
     const IRECT mag = field.GetFromLeft(30.0f).GetCentredInside(12.0f);
-    g.DrawEllipse(IColor(255, 139, 142, 152), mag.GetFromTLHC(9.0f, 9.0f));
-    g.DrawLine(IColor(255, 139, 142, 152), mag.L + 8.0f, mag.T + 8.0f, mag.R, mag.B, nullptr, 1.6f);
+    g.DrawEllipse(accent, mag.GetFromTLHC(9.0f, 9.0f));
+    g.DrawLine(accent, mag.L + 8.0f, mag.T + 8.0f, mag.R, mag.B, nullptr, 1.6f);
     std::string query;
     std::string error;
     long long total = 0;
@@ -985,8 +987,8 @@ public:
       total = mShared->total;
       numResults = mShared->results.size();
     }
-    const IText fieldText(
-      11.0f, query.empty() ? IColor(255, 110, 113, 122) : COLOR_WHITE, "Inter-Regular", EAlign::Near, EVAlign::Middle);
+    const IText fieldText(11.0f, query.empty() ? IColor(255, 107, 101, 82) : IColor(255, 236, 230, 212),
+                          "JetBrainsMono-Regular", EAlign::Near, EVAlign::Middle);
     g.DrawText(fieldText, query.empty() ? "Search amps, pedals, cabs... (click, type, press Enter)" : query.c_str(),
                field.GetReducedFromLeft(32.0f).GetReducedFromRight(10.0f));
 
@@ -996,10 +998,10 @@ public:
       const IRECT chip = FormatChipRect(i);
       const bool sel = i == mFormatSel;
       const bool over = mMouseOverFormatChip == i;
-      g.FillRoundRect(sel ? accent : IColor(255, 26, 27, 33), chip, 4.0f);
-      if (over && !sel)
-        g.DrawRoundRect(accent, chip, 4.0f);
-      const IText chipText(7.5f, sel ? COLOR_BLACK : (over ? COLOR_WHITE : IColor(255, 150, 153, 162)), "Inter-Bold",
+      g.FillRect(sel ? accent : accent.WithOpacity(0.06f), chip);
+      if (!sel)
+        g.DrawRect(over ? accent : accent.WithOpacity(0.25f), chip, nullptr, 1.0f);
+      const IText chipText(7.5f, sel ? IColor(255, 11, 10, 7) : IColor(255, 201, 194, 174), "JetBrainsMono-Bold",
                            EAlign::Center, EVAlign::Middle);
       g.DrawText(chipText, FormatChipLabel(i), chip);
     }
@@ -1008,10 +1010,10 @@ public:
       const IRECT chip = GearChipRect(i);
       const bool sel = i == mGearSel;
       const bool over = mMouseOverGearChip == i;
-      g.FillRoundRect(sel ? accent : IColor(255, 32, 33, 41), chip, chip.H() * 0.5f);
-      if (over && !sel)
-        g.DrawRoundRect(accent, chip, chip.H() * 0.5f);
-      const IText chipText(7.5f, sel ? COLOR_BLACK : (over ? COLOR_WHITE : IColor(255, 150, 153, 162)), "Inter-Bold",
+      g.FillRect(sel ? accent : accent.WithOpacity(0.06f), chip);
+      if (!sel)
+        g.DrawRect(over ? accent : accent.WithOpacity(0.25f), chip, nullptr, 1.0f);
+      const IText chipText(7.5f, sel ? IColor(255, 11, 10, 7) : IColor(255, 201, 194, 174), "JetBrainsMono-Bold",
                            EAlign::Center, EVAlign::Middle);
       g.DrawText(chipText, GearChipLabelFor(i), chip);
     }
@@ -1023,24 +1025,24 @@ public:
       const bool sel = i == mSortSel;
       const bool over = mMouseOverSortChip == i;
       if (sel)
-        g.FillRoundRect(accent.WithOpacity(0.18f), chip, chip.H() * 0.5f);
-      const IText chipText(7.5f, sel ? accent : (over ? COLOR_WHITE : IColor(255, 120, 123, 132)), "Inter-Bold",
-                           EAlign::Center, EVAlign::Middle);
+        g.FillRect(accent.WithOpacity(0.18f), chip);
+      const IText chipText(7.5f, sel ? accent : (over ? IColor(255, 236, 230, 212) : IColor(255, 147, 140, 120)),
+                           "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(chipText, SortChipLabel(i), chip);
     }
     {
       const IRECT chip = TagsChipRect();
       const bool active = !mSelectedTags.empty() || mTagsOpen;
-      g.FillRoundRect(active ? accent : IColor(255, 32, 33, 41), chip, chip.H() * 0.5f);
-      if (mMouseOverTagsBtn && !active)
-        g.DrawRoundRect(accent, chip, chip.H() * 0.5f);
-      const IText chipText(7.5f, active ? COLOR_BLACK : (mMouseOverTagsBtn ? COLOR_WHITE : IColor(255, 150, 153, 162)),
-                           "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.FillRect(active ? accent : accent.WithOpacity(0.06f), chip);
+      if (!active)
+        g.DrawRect(mMouseOverTagsBtn ? accent : accent.WithOpacity(0.25f), chip, nullptr, 1.0f);
+      const IText chipText(7.5f, active ? IColor(255, 11, 10, 7) : IColor(255, 201, 194, 174), "JetBrainsMono-Bold",
+                           EAlign::Center, EVAlign::Middle);
       g.DrawText(chipText, TagsChipLabel().c_str(), chip);
     }
 
     // Status (right side of row 2)
-    const IText statusText(9.0f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Far, EVAlign::Middle);
+    const IText statusText(9.0f, IColor(255, 147, 140, 120), "Inter-Regular", EAlign::Far, EVAlign::Middle);
     const IRECT statusArea = StatusRect();
     if (mShared->busy)
     {
@@ -1082,7 +1084,7 @@ public:
         const IRECT more = LoadMoreRect((int)mShared->results.size());
         if (more.B >= grid.T && more.T <= grid.B)
         {
-          g.FillRoundRect(mMouseOverMore ? accent : accent.WithOpacity(0.2f), more, 12.0f);
+          g.FillRect(mMouseOverMore ? accent : accent.WithOpacity(0.2f), more);
           const IText moreText(
             10.0f, mMouseOverMore ? COLOR_BLACK : accent, "Inter-Bold", EAlign::Center, EVAlign::Middle);
           g.DrawText(moreText, "LOAD MORE", more);
@@ -1097,8 +1099,8 @@ public:
       const float barH = std::max(18.0f, frac * grid.H());
       const float travel = grid.H() - barH;
       const float pos = (mScroll / (contentH - grid.H())) * travel;
-      g.FillRoundRect(
-        accent.WithOpacity(0.5f), IRECT(mRECT.R - 6.0f, grid.T + pos, mRECT.R - 4.0f, grid.T + pos + barH), 1.0f);
+      g.FillRect(
+        accent.WithOpacity(0.5f), IRECT(mRECT.R - 6.0f, grid.T + pos, mRECT.R - 4.0f, grid.T + pos + barH));
     }
     g.PathClipRegion();
 
@@ -1112,11 +1114,11 @@ public:
   void DrawTagsPanel(IGraphics& g, const IColor& accent)
   {
     const IRECT panel = TagPanelRect();
-    g.FillRoundRect(IColor(255, 23, 24, 28), panel, 8.0f);
-    g.DrawRoundRect(IColor(40, 255, 255, 255), panel, 8.0f);
+    g.FillRect(IColor(255, 10, 9, 6), panel);
+    g.DrawRect(IColor(51, 233, 195, 74), panel);
 
     const IRECT inner = panel.GetPadded(-10.0f);
-    const IText headText(8.5f, IColor(255, 139, 142, 152), "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    const IText headText(8.5f, IColor(255, 147, 140, 120), "Inter-Bold", EAlign::Near, EVAlign::Middle);
     g.DrawText(headText, "FILTER BY TAGS", inner.GetFromTop(14.0f));
     if (!mSelectedTags.empty())
     {
@@ -1133,7 +1135,7 @@ public:
       if (mSpinnerPhase > 360.0f)
         mSpinnerPhase -= 360.0f;
       g.DrawArc(accent, inner.L + 8.0f, inner.T + 34.0f, 6.0f, mSpinnerPhase, mSpinnerPhase + 270.0f, nullptr, 2.0f);
-      const IText loadText(8.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Middle);
+      const IText loadText(8.5f, IColor(255, 147, 140, 120), "Inter-Regular", EAlign::Near, EVAlign::Middle);
       g.DrawText(
         loadText, "Loading tags from TONE3000...", IRECT(inner.L + 20.0f, inner.T + 26.0f, inner.R, inner.T + 42.0f));
     }
@@ -1152,10 +1154,10 @@ public:
       {
         const bool sel = mSelectedTags.count(c.first) > 0;
         const bool over = c.first == mHoverTag;
-        g.FillRoundRect(sel ? accent : IColor(255, 40, 41, 49), c.second, c.second.H() * 0.5f);
+        g.FillRect(sel ? accent : IColor(255, 21, 18, 10), c.second);
         if (over && !sel)
-          g.DrawRoundRect(accent, c.second, c.second.H() * 0.5f);
-        const IText tagText(7.0f, sel ? COLOR_BLACK : (over ? COLOR_WHITE : IColor(255, 170, 173, 182)),
+          g.DrawRect(accent, c.second);
+        const IText tagText(7.0f, sel ? COLOR_BLACK : (over ? COLOR_WHITE : IColor(255, 201, 194, 174)),
                             "Inter-Regular", EAlign::Center, EVAlign::Middle);
         g.DrawText(tagText, c.first.c_str(), c.second);
       }
@@ -1167,8 +1169,8 @@ public:
         const float barH = std::max(14.0f, frac * scrollArea.H());
         const float travel = scrollArea.H() - barH;
         const float pos = (mTagScroll / (mTagContentH - scrollArea.H())) * travel;
-        g.FillRoundRect(accent.WithOpacity(0.5f),
-                        IRECT(panel.R - 5.0f, scrollArea.T + pos, panel.R - 3.0f, scrollArea.T + pos + barH), 1.0f);
+        g.FillRect(accent.WithOpacity(0.5f),
+                        IRECT(panel.R - 5.0f, scrollArea.T + pos, panel.R - 3.0f, scrollArea.T + pos + barH));
       }
       g.PathClipRegion();
     }
@@ -1646,7 +1648,7 @@ private:
 
     // Back button (top row, next to the title)
     const IRECT back = BackRect();
-    const IColor backColor = mMouseOverBack ? COLOR_WHITE : IColor(255, 150, 153, 162);
+    const IColor backColor = mMouseOverBack ? COLOR_WHITE : IColor(255, 147, 140, 120);
     const IText backText(9.0f, backColor, "Inter-Bold", EAlign::Near, EVAlign::Middle);
     g.DrawText(backText, "< BACK TO RESULTS", back);
 
@@ -1679,7 +1681,7 @@ private:
     }
     else
     {
-      g.FillRoundRect(accent.WithOpacity(0.08f), photo, 8.0f);
+      g.FillRect(accent.WithOpacity(0.08f), photo);
       if (!r.imageUrl.empty())
         thumbLoading = true;
     }
@@ -1695,7 +1697,7 @@ private:
     y += 2.0f;
 
     // Byline
-    const IText byText(9.0f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Top);
+    const IText byText(9.0f, IColor(255, 147, 140, 120), "Inter-Regular", EAlign::Near, EVAlign::Top);
     std::stringstream by;
     by << "by " << r.author;
     if (r.downloads > 0)
@@ -1710,7 +1712,7 @@ private:
       std::vector<std::pair<std::string, IColor>> chips;
       chips.push_back({tonegallery::GearTypeChipLabel(gt), tonegallery::GearTypeColor(gt)});
       for (const auto& t : r.tags)
-        chips.push_back({t, IColor(255, 55, 57, 66)});
+        chips.push_back({t, IColor(255, 21, 18, 10)});
       float cx = area.L;
       for (const auto& chip : chips)
       {
@@ -1721,10 +1723,10 @@ private:
           y += 18.0f;
         }
         const IRECT cr = IRECT(cx, y, cx + w, y + 13.0f);
-        g.FillRoundRect(chip.second, cr, 5.0f);
+        g.FillRect(chip.second, cr);
         const bool dark = &chip == &chips[0]; // gear chip gets dark text on its bright color
         const IText chipText(
-          7.0f, dark ? COLOR_BLACK : IColor(255, 190, 193, 202), "Inter-Bold", EAlign::Center, EVAlign::Middle);
+          7.0f, dark ? COLOR_BLACK : IColor(255, 201, 194, 174), "Inter-Bold", EAlign::Center, EVAlign::Middle);
         g.DrawText(chipText, chip.first.c_str(), cr);
         cx += w + 5.0f;
       }
@@ -1734,7 +1736,7 @@ private:
     // Full description
     if (!r.description.empty())
     {
-      const IText descText(9.5f, IColor(255, 170, 173, 182), "Inter-Regular", EAlign::Near, EVAlign::Top);
+      const IText descText(9.5f, IColor(255, 201, 194, 174), "Inter-Regular", EAlign::Near, EVAlign::Top);
       for (const auto& line : tonegallery::WrapLines(r.description, 84, 40))
       {
         g.DrawText(descText, line.c_str(), IRECT(area.L, y, area.R, y + 13.0f));
@@ -1744,7 +1746,7 @@ private:
     }
 
     // Variations / included capture files
-    const IText headText(9.0f, IColor(255, 139, 142, 152), "Inter-Bold", EAlign::Near, EVAlign::Top);
+    const IText headText(9.0f, IColor(255, 147, 140, 120), "Inter-Bold", EAlign::Near, EVAlign::Top);
     auto ms = mDetailModels;
     if (ms != nullptr)
     {
@@ -1789,16 +1791,16 @@ private:
           const IRECT row = IRECT(area.L, y, area.R, y + 18.0f);
           if (row.B >= area.T && row.T <= area.B)
           {
-            g.FillRoundRect(IColor(255, 26, 27, 33), row, 5.0f);
+            g.FillRect(IColor(255, 15, 13, 8), row);
             g.FillEllipse(accent, IRECT(row.L + 7.0f, row.MH() - 2.0f, row.L + 11.0f, row.MH() + 2.0f));
             g.DrawText(rowText, tonegallery::Ellipsize(pair.second.name, 70).c_str(),
                        row.GetReducedFromLeft(16.0f).GetReducedFromRight(34.0f));
             const bool isA2 = pair.second.arch == "2";
             const bool isWav = t3k::UrlExtension(pair.second.url, ".nam") == ".wav";
             const IRECT arcChip = row.GetFromRight(28.0f).GetCentredInside(24.0f, 11.0f);
-            g.FillRoundRect(isA2 ? accent.WithOpacity(0.25f) : IColor(255, 55, 57, 66), arcChip, 4.0f);
+            g.FillRect(isA2 ? accent.WithOpacity(0.25f) : IColor(255, 21, 18, 10), arcChip);
             const IText arcText(
-              6.5f, isA2 ? accent : IColor(255, 150, 153, 162), "Inter-Bold", EAlign::Center, EVAlign::Middle);
+              6.5f, isA2 ? accent : IColor(255, 147, 140, 120), "Inter-Bold", EAlign::Center, EVAlign::Middle);
             g.DrawText(arcText, isWav ? "IR" : (isA2 ? "A2" : "A1"), arcChip);
           }
           y += 21.0f;
@@ -1816,8 +1818,8 @@ private:
       const float barH = std::max(18.0f, frac * area.H());
       const float travel = area.H() - barH;
       const float pos = (mDetailScroll / (mDetailContentH - area.H())) * travel;
-      g.FillRoundRect(
-        accent.WithOpacity(0.5f), IRECT(mRECT.R - 6.0f, area.T + pos, mRECT.R - 4.0f, area.T + pos + barH), 1.0f);
+      g.FillRect(
+        accent.WithOpacity(0.5f), IRECT(mRECT.R - 6.0f, area.T + pos, mRECT.R - 4.0f, area.T + pos + barH));
     }
     g.PathClipRegion();
 
@@ -1827,7 +1829,7 @@ private:
     const int dlStatus = found != mDownloads.end() ? found->second->status.load() : 0;
     if (dlStatus == 1)
     {
-      g.FillRoundRect(accent.WithOpacity(0.25f), btn, btn.H() * 0.5f);
+      g.FillRect(accent.WithOpacity(0.25f), btn);
       mSpinnerPhase += 6.0f;
       g.DrawArc(accent, btn.L + 16.0f, btn.MH(), 7.0f, mSpinnerPhase, mSpinnerPhase + 270.0f, nullptr, 2.0f);
       const IText btnText(10.0f, accent, "Inter-Bold", EAlign::Center, EVAlign::Middle);
@@ -1835,21 +1837,21 @@ private:
     }
     else if (dlStatus == 2)
     {
-      g.FillRoundRect(IColor(255, 88, 214, 141), btn, btn.H() * 0.5f);
+      g.FillRect(IColor(255, 88, 214, 141), btn);
       const IText btnText(10.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(btnText, "ADDED TO LIBRARY", btn);
     }
     else if (dlStatus == 3)
     {
-      g.FillRoundRect(IColor(255, 232, 90, 90), btn, btn.H() * 0.5f);
+      g.FillRect(IColor(255, 232, 90, 90), btn);
       const IText btnText(10.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(btnText, "FAILED - CLICK TO RETRY", btn);
     }
     else
     {
-      g.FillRoundRect(mMouseOverDL ? accent : accent.WithOpacity(0.85f), btn, btn.H() * 0.5f);
+      g.FillRect(mMouseOverDL ? accent : accent.WithOpacity(0.85f), btn);
       if (mMouseOverDL)
-        g.DrawRoundRect(accent.WithOpacity(0.35f), btn.GetPadded(2.0f), btn.H() * 0.5f + 2.0f, nullptr, 2.5f);
+        g.DrawRect(accent.WithOpacity(0.35f), btn.GetPadded(2.0f), nullptr, 2.5f);
       const IText btnText(10.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(btnText, "DOWNLOAD TONE", btn);
     }
@@ -1954,7 +1956,8 @@ private:
   void DrawCard(IGraphics& g, const t3k::SearchResult& r, const IRECT& card, bool mouseOver, const IColor& accent,
                 bool& anyDownloading)
   {
-    g.FillRoundRect(IColor(255, 32, 33, 41), card, 8.0f);
+    // AMPRYX: square card on the mock's #100e09 face.
+    g.FillRect(IColor(255, 16, 14, 9), card);
 
     // Photo
     const IRECT photo = card.GetFromTop(kPhotoHeight).GetPadded(-1.5f);
@@ -1979,7 +1982,7 @@ private:
     }
     else
     {
-      g.FillRoundRect(accent.WithOpacity(0.08f), photo, 6.0f);
+      g.FillRect(accent.WithOpacity(0.08f), photo);
       if (!r.imageUrl.empty())
       {
         anyDownloading = true; // keep polling until the thumb arrives
@@ -1988,7 +1991,7 @@ private:
 
     // Title (2 lines) + author
     const IRECT body = card.GetReducedFromTop(kPhotoHeight).GetPadded(-6.0f);
-    const IText nameText(8.5f, COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Top);
+    const IText nameText(8.5f, IColor(255, 236, 230, 212), "JetBrainsMono-Bold", EAlign::Near, EVAlign::Top);
     std::string l1, l2;
     {
       const auto lines = tonegallery::WrapLines(r.title, 26, 2);
@@ -1999,7 +2002,7 @@ private:
     if (!l2.empty())
       g.DrawText(nameText, l2.c_str(), body.GetReducedFromTop(10.0f).GetFromTop(10.0f));
 
-    const IText metaText(7.5f, IColor(255, 139, 142, 152), "Inter-Regular", EAlign::Near, EVAlign::Middle);
+    const IText metaText(7.5f, IColor(255, 147, 140, 120), "JetBrainsMono-Regular", EAlign::Near, EVAlign::Middle);
     std::stringstream meta;
     meta << "by " << r.author;
     if (r.downloads > 0)
@@ -2013,8 +2016,8 @@ private:
     const char* gearLabel = tonegallery::GearTypeChipLabel(gt);
     const float gw = 10.0f + 4.6f * (float)strlen(gearLabel);
     const IRECT chip = body.GetFromBottom(11.0f).GetFromLeft(gw);
-    g.FillRoundRect(gearColor, chip, 4.0f);
-    const IText chipText(6.5f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    g.FillRect(gearColor, chip);
+    const IText chipText(6.5f, IColor(255, 11, 10, 7), "JetBrainsMono-Regular", EAlign::Center, EVAlign::Middle);
     g.DrawText(chipText, gearLabel, chip);
 
     // Download state overlay
@@ -2023,37 +2026,32 @@ private:
     if (dlStatus == 1)
     {
       anyDownloading = true;
-      g.FillRoundRect(COLOR_BLACK.WithOpacity(0.55f), card, 8.0f);
+      g.FillRect(COLOR_BLACK.WithOpacity(0.65f), card);
       mSpinnerPhase += 4.0f;
       g.DrawArc(accent, card.MW(), card.MH() - 8.0f, 10.0f, mSpinnerPhase, mSpinnerPhase + 270.0f, nullptr, 2.5f);
-      const IText dlText(9.0f, COLOR_WHITE, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      const IText dlText(9.0f, IColor(255, 236, 230, 212), "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(dlText, "DOWNLOADING...", card.GetFromBottom(30.0f));
     }
     else if (dlStatus == 2)
     {
       const IRECT badge = card.GetFromTRHC(58.0f, 20.0f).GetPadded(-2.0f);
-      g.FillRoundRect(IColor(255, 88, 214, 141), badge, 9.0f);
-      const IText okText(8.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.FillRect(IColor(255, 88, 214, 141), badge);
+      const IText okText(8.0f, IColor(255, 11, 10, 7), "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(okText, "ADDED", badge);
     }
     else if (dlStatus == 3)
     {
       const IRECT badge = card.GetFromTRHC(58.0f, 20.0f).GetPadded(-2.0f);
-      g.FillRoundRect(IColor(255, 232, 90, 90), badge, 9.0f);
-      const IText okText(8.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      g.FillRect(IColor(255, 232, 90, 90), badge);
+      const IText okText(8.0f, IColor(255, 11, 10, 7), "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(okText, "FAILED", badge);
     }
 
-    // Border
+    // Border: square, gold on hover / faint gold at rest (AMPRYX).
     if (mouseOver && dlStatus == 0)
-    {
-      g.DrawRoundRect(accent.WithOpacity(0.25f), card.GetPadded(1.0f), 9.0f, nullptr, 3.0f);
-      g.DrawRoundRect(accent, card, 8.0f, nullptr, 1.2f);
-    }
+      g.DrawRect(accent, card.GetPadded(-1.0f), nullptr, 2.0f);
     else
-    {
-      g.DrawRoundRect(IColor(18, 255, 255, 255), card, 8.0f);
-    }
+      g.DrawRect(accent.WithOpacity(0.20f), card.GetPadded(-0.5f), nullptr, 1.0f);
   }
 
   std::shared_ptr<t3k::BrowserShared> mShared;
