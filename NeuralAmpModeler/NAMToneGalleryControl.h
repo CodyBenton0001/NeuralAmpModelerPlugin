@@ -1758,9 +1758,10 @@ public:
 
   void Draw(IGraphics& g) override
   {
-    // Panel (AMPRYX: near-black sidebar with a gold hairline edge)
+    // Panel (AMPRYX: near-black sidebar with a solid 2px gold right edge,
+    // matching the mock's border-right on the tone library column).
     g.FillRect(IColor(255, 10, 9, 6), mRECT);
-    g.FillRect(IColor(40, 233, 195, 74), mRECT.GetFromRight(1.0f));
+    g.FillRect(IColor(255, 233, 195, 74), mRECT.GetFromRight(2.0f));
 
     // Header ("TONE LIBRARY" in Archivo Black, per the mock)
     const IRECT header = mRECT.GetFromTop(kHeaderHeight);
