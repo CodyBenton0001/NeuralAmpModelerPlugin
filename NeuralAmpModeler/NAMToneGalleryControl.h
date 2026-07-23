@@ -1073,34 +1073,55 @@ public:
       const IRECT slot = SlotRect(i);
       const bool valid = mSlotValid[i];
       const bool over = (i == mMouseOverSlot);
-      const bool active = valid && !mNowPlayingDir.empty() && mSlotEntries[i].directory == mNowPlayingDir;
-      const IColor accent = valid ? tonegallery::GearTypeColor(mSlotEntries[i].gearType) : tonegallery::AccentColor();
+      const IColor accent = tonegallery::AccentColor();
 
-      g.FillRoundRect(active ? accent.WithOpacity(0.15f) : IColor(255, 30, 30, 34), slot, 8.0f);
+      // Gradient faceplate + square gold border (AMPRYX mock channel button).
+      g.PathClear();
+      g.PathRect(slot);
+      g.PathFill(IPattern::CreateLinearGradient(
+        slot.L, slot.T, slot.L, slot.B, {{IColor(255, 21, 18, 10), 0.0f}, {IColor(255, 13, 11, 7), 1.0f}}));
+      g.FillRect(COLOR_WHITE.WithOpacity(0.06f), slot.GetFromTop(1.0f));
       if (over)
-        g.FillRoundRect(PluginColors::MOUSEOVER, slot, 8.0f);
-      if (active)
-        g.DrawRoundRect(accent.WithOpacity(0.3f), slot.GetPadded(1.5f), 9.0f, nullptr, 3.0f);
-      g.DrawRoundRect(valid ? accent.WithOpacity(active ? 1.0f : 0.7f) : accent.WithOpacity(0.15f), slot, 8.0f);
+        g.FillRect(PluginColors::MOUSEOVER, slot);
+      g.DrawRect(valid ? accent : accent.WithOpacity(0.35f), slot.GetPadded(-1.0f), nullptr, 2.0f);
 
-      // Numbered badge
-      const IRECT badge = slot.GetFromLeft(slot.H()).GetCentredInside(18.0f);
-      g.FillEllipse(valid ? accent : accent.WithOpacity(0.25f), badge);
-      const IText badgeText(11.0f, COLOR_BLACK, "Inter-Regular", EAlign::Center, EVAlign::Middle);
-      const char num[2] = {(char)('1' + i), 0};
-      g.DrawText(badgeText, num, badge);
-
-      // Label
-      const IRECT labelArea = slot.GetReducedFromLeft(slot.H() * 0.85f).GetReducedFromRight(8.0f);
+      const IRECT inner = slot.GetPadded(-12.0f);
+      // Top row: glowing LED + big number (left), gear tag chip (right).
+      const IRECT top = inner.GetFromTop(22.0f);
+      const float ledx = top.L + 5.0f, ledy = top.MH();
       if (valid)
       {
-        const IText nameText(12.0f, COLOR_WHITE, "Inter-Regular", EAlign::Near, EVAlign::Middle);
-        g.DrawText(nameText, tonegallery::Ellipsize(mSlotEntries[i].name, 22).c_str(), labelArea);
+        g.PathCircle(ledx, ledy, 8.0f);
+        g.PathFill(
+          IPattern::CreateRadialGradient(ledx, ledy, 8.0f, {{accent.WithOpacity(0.6f), 0.0f}, {COLOR_TRANSPARENT, 1.0f}}));
+      }
+      g.FillCircle(valid ? accent : accent.WithOpacity(0.4f), ledx, ledy, 4.5f);
+      const IText numText(
+        20.0f, valid ? accent : accent.WithOpacity(0.4f), "ArchivoBlack", EAlign::Near, EVAlign::Middle);
+      const char num[2] = {(char)('1' + i), 0};
+      g.DrawText(numText, num, IRECT(ledx + 13.0f, top.T, ledx + 45.0f, top.B));
+
+      if (valid)
+      {
+        const char* chip = tonegallery::GearTypeChipLabel(mSlotEntries[i].gearType);
+        const float cw = 12.0f + 5.2f * (float)strlen(chip);
+        const IRECT chipR(top.R - cw, top.MH() - 8.0f, top.R, top.MH() + 8.0f);
+        g.FillRect(accent, chipR);
+        const IText chipText(9.0f, IColor(255, 11, 10, 7), "JetBrainsMono-Regular", EAlign::Center, EVAlign::Middle);
+        g.DrawText(chipText, chip, chipR);
+      }
+
+      // Name (bottom row).
+      const IRECT nameR = inner.GetFromBottom(18.0f);
+      if (valid)
+      {
+        const IText nameText(13.0f, IColor(255, 236, 230, 212), "JetBrainsMono-Regular", EAlign::Near, EVAlign::Middle);
+        g.DrawText(nameText, tonegallery::Ellipsize(mSlotEntries[i].name, 24).c_str(), nameR);
       }
       else
       {
-        const IText emptyText(10.0f, PluginColors::HELP_TEXT, "Inter-Regular", EAlign::Near, EVAlign::Middle);
-        g.DrawText(emptyText, "Empty - right-click a tone", labelArea);
+        const IText emptyText(11.0f, IColor(255, 147, 140, 120), "JetBrainsMono-Regular", EAlign::Near, EVAlign::Middle);
+        g.DrawText(emptyText, "Empty - right-click a tone", nameR);
       }
     }
   }

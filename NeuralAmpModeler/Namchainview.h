@@ -51,19 +51,20 @@ public:
     const float angle = a1 + (float)morph * (a2 - a1);
     const IColor arcCol = hasB ? accent : namtheme::TEXT_FAINT;
 
-    g.DrawArc(namtheme::TRACK, cx, cy, radius, a1, a2, nullptr, 3.5f);
-    if (hasB && angle > a1 + 0.5f)
-      g.DrawArc(arcCol, cx, cy, radius, a1, angle, nullptr, 3.5f);
-
-    const float capR = radius - 7.0f;
-    const IRECT capRect(cx - capR, cy - capR, cx + capR, cy + capR);
-    g.FillEllipse(namtheme::KNOB_FACE, capRect);
-    g.DrawEllipse(namtheme::LINE, capRect);
-    if (mHover && hasB)
-      g.FillEllipse(PluginColors::MOUSEOVER, capRect);
-
     if (hasB)
     {
+      // Active morph knob: thick track + value ring with a glowing dot.
+      g.DrawArc(namtheme::TRACK, cx, cy, radius, a1, a2, nullptr, 7.0f);
+      if (angle > a1 + 0.5f)
+        g.DrawArc(arcCol, cx, cy, radius, a1, angle, nullptr, 7.0f);
+
+      const float capR = radius - 9.0f;
+      const IRECT capRect(cx - capR, cy - capR, cx + capR, cy + capR);
+      g.FillEllipse(namtheme::KNOB_FACE, capRect);
+      g.DrawEllipse(namtheme::LINE, capRect);
+      if (mHover)
+        g.FillEllipse(PluginColors::MOUSEOVER, capRect);
+
       const float rad = (angle - 90.0f) * 3.14159265f / 180.0f;
       const float px = cx + (capR * 0.62f) * std::cos(rad);
       const float py = cy + (capR * 0.62f) * std::sin(rad);
@@ -74,8 +75,18 @@ public:
     }
     else
     {
-      const IText plus(15.0f, accent.WithOpacity(0.85f), namtheme::kFontBold, EAlign::Center, EVAlign::Middle);
-      g.DrawText(plus, "+", capRect);
+      // No B yet: a dashed gold ring with a big "+" (AMPRYX mock).
+      const IRECT fill(cx - radius, cy - radius, cx + radius, cy + radius);
+      g.FillEllipse(namtheme::KNOB_FACE.WithOpacity(0.6f), fill);
+      const int kDash = 22;
+      for (int i = 0; i < kDash; i++)
+      {
+        const float d0 = 360.0f * (float)i / kDash;
+        const float d1 = d0 + 0.55f * 360.0f / kDash;
+        g.DrawArc(accent.WithOpacity(0.5f), cx, cy, radius, d0, d1, nullptr, 2.0f);
+      }
+      const IText plus(30.0f, accent, namtheme::kFontMono, EAlign::Center, EVAlign::Middle);
+      g.DrawText(plus, "+", fill);
     }
 
     const IText label(12.0f, hasB ? accent : namtheme::TEXT_DIM, namtheme::kFontBold, EAlign::Center, EVAlign::Middle);

@@ -338,13 +338,14 @@ const float cx = knobRect.MW(), cy = knobRect.MH();
 const float angle = mAngle1 + (static_cast<float>(GetValue()) * (mAngle2 - mAngle1));
 const IColor accent = GetColor(kX1);
 
-// Track + value arcs
-g.DrawArc(namtheme::TRACK, cx, cy, widgetRadius, mAngle1, mAngle2, &mBlend, 3.5f);
+// Track + value arcs (thick conic-style ring, AMPRYX mock).
+const float kArcW = 7.0f;
+g.DrawArc(namtheme::TRACK, cx, cy, widgetRadius, mAngle1, mAngle2, &mBlend, kArcW);
 if (angle > mAngle1 + 0.5f)
-g.DrawArc(accent, cx, cy, widgetRadius, mAngle1, angle, &mBlend, 3.5f);
+g.DrawArc(accent, cx, cy, widgetRadius, mAngle1, angle, &mBlend, kArcW);
 
 // Face
-const float capR = widgetRadius - 7.0f;
+const float capR = widgetRadius - 9.0f;
 const IRECT capRect(cx - capR, cy - capR, cx + capR, cy + capR);
 g.FillEllipse(namtheme::KNOB_FACE, capRect, &mBlend);
 g.DrawEllipse(namtheme::LINE, capRect, &mBlend, 1.0f);
