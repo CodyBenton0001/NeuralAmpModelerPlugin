@@ -197,11 +197,16 @@ IColor mCachedAccent = COLOR_TRANSPARENT;
 class AmpryxTextureControl : public IControl
 {
 public:
-AmpryxTextureControl(const IRECT& bounds, const IBitmap& bitmap, float opacity = 0.6f, bool flip = false)
+// vBias shifts the cover-crop vertically: 0 = centred, -1 = top of the image,
+// +1 = bottom. Useful to steer away from busy areas of an engraving (e.g. the
+// village rooftops/spire, whose hard verticals read as UI artefacts).
+AmpryxTextureControl(const IRECT& bounds, const IBitmap& bitmap, float opacity = 0.6f, bool flip = false,
+float vBias = 0.0f)
 : IControl(bounds)
 , mBitmap(bitmap)
 , mOpacity(opacity)
 , mFlip(flip)
+, mVBias(vBias)
 {
 mIgnoreMouse = true;
 }
@@ -217,7 +222,13 @@ IRECT cover = mRECT;
 if (bmpAspect > areaAspect)
 cover = mRECT.GetMidHPadded(0.5f * mRECT.H() * bmpAspect);
 else
+{
 cover = mRECT.GetMidVPadded(0.5f * mRECT.W() / bmpAspect);
+// Slide the crop window over the image (mVBias -1..+1) so we can avoid
+// busy bands of the source art.
+const float slack = 0.5f * (cover.H() - mRECT.H());
+cover = cover.GetVShifted(mVBias * slack);
+}
 
 g.PathClipRegion(mRECT);
 if (mFlip)
@@ -229,6 +240,9 @@ IBlend blend(EBlend::Default, mOpacity);
 g.DrawFittedBitmap(mBitmap, cover, &blend);
 if (mFlip)
 g.PathTransformReset();
+// Lift the blacks so the engraving's hardest strokes (spires, fence posts)
+// don't read as solid lines cutting through the panel.
+g.FillRect(namtheme::TEXT_FAINT.WithOpacity(0.22f), mRECT);
 // Gold wash to tint the greyscale engraving toward the accent.
 g.FillRect(namtheme::Gold().WithOpacity(0.10f), mRECT, &BlendAdd());
 // Radial vignette so the texture reads only in the centre.
@@ -248,6 +262,7 @@ return b;
 IBitmap mBitmap;
 float mOpacity;
 bool mFlip;
+float mVBias;
 };
 
 // AMPRYX window frame: the 2px gold border around the whole plugin (mock).

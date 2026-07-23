@@ -386,7 +386,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new AmpryxDotGridControl(b));
     const auto knobCardArea = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
     pGraphics->AttachControl(new ThemedCardControl(knobCardArea, namtheme::PANEL2, 0.0f, namtheme::Border(), 2.0f, true));
-    pGraphics->AttachControl(new AmpryxTextureControl(knobCardArea.GetPadded(-2.0f), asciiHeroBitmap, 0.42f));
+    // vBias -0.55 crops the upper (mountain/cloud) band of the engraving; the
+    // centre band is the village, whose spire and fence posts read as hard
+    // vertical lines cutting between the knobs.
+    pGraphics->AttachControl(
+      new AmpryxTextureControl(knobCardArea.GetPadded(-2.0f), asciiHeroBitmap, 0.42f, false, -0.55f));
     // The toggle bar's square gold-bordered background (behind the four switches).
     pGraphics->AttachControl(new ThemedCardControl(toggleBar, namtheme::CARD, 0.0f, namtheme::Border(), 2.0f, true));
     // Stacked logo, centred across the full content width (the TONE3000 and
