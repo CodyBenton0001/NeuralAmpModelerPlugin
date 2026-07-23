@@ -230,8 +230,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto irSwitchArea = IRECT(spanR - 26.0f, irArea.MH() - 9.0f, spanR - 8.0f, irArea.MH() + 9.0f);
     // Hidden legacy model browser keeps a rect stacked above the IR row.
     const auto modelArea = irArea.GetVShifted(-38.0f);
+    // Slim (model-complexity) toggle -- only shown for slimmable models. Parked
+    // in the utility bar alongside the other icons instead of floating past the
+    // right edge of the IR row.
     const auto slimIconArea =
-      IRECT(irArea.R + 6.f, irArea.MH() - 14.f, irArea.R + 6.f + 2.f * 28.f, irArea.MH() + 14.f);
+      utilityBarArea.GetFromRight(30.0f).GetCentredInside(15.0f).GetTranslated(-4.0f * 24.0f, 0.0f);
 
     // Meters: thin vertical bars flanking the knob panel (AMPRYX mock).
     const auto knobPanelRect = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
