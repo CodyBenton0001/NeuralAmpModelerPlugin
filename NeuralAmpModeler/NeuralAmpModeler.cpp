@@ -189,9 +189,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto mainB = rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight + kFavoritesBarHeight);
     const auto mainArea = mainB.GetPadded(-20);
     const auto contentArea = mainArea.GetPadded(-10);
-    // AMPRYX skin: taller header for the stacked centred logo (sigil above the
-    // AMPRYX wordmark above the subtitle).
-    const auto titleHeight = 92.0f;
+    // AMPRYX skin: single-row header (sigil logo beside the AMPRYX wordmark,
+    // flanked by the TONE3000 and SIGNAL CHAIN buttons).
+    const auto titleHeight = 66.0f;
     const auto titleArea = contentArea.GetFromTop(titleHeight);
 
     // Areas for knobs
@@ -243,13 +243,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto outputMeterArea =
       IRECT(knobPanelRect.R + 8.0f, knobPanelRect.T, knobPanelRect.R + 26.0f, knobPanelRect.B);
 
-    // Misc Areas
-    const auto settingsButtonArea = CornerButtonArea(mainB);
-    // Wide titlebar buttons -- defined up here so the plugin title can be
-    // centered in the space BETWEEN them (no overlap at any accent/name).
-    const IRECT chainButtonArea(settingsButtonArea.L - 200.0f, settingsButtonArea.MH() - 13.0f,
-                                settingsButtonArea.L - 92.0f, settingsButtonArea.MH() + 13.0f);
-    const IRECT t3kButtonArea = mainArea.GetFromTLHC(130.0f, 50.0f).GetCentredInside(118.0f, 38.0f);
+    // AMPRYX header buttons: square TONE3000 (left) + SIGNAL CHAIN (right),
+    // vertically centred on the logo row.
+    const float kHdrBtnH = 48.0f;
+    const IRECT t3kButtonArea(contentArea.L, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.L + 178.0f,
+                              titleArea.MH() + 0.5f * kHdrBtnH);
+    const IRECT chainButtonArea(contentArea.R - 192.0f, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.R,
+                                titleArea.MH() + 0.5f * kHdrBtnH);
 
     // Model loader button
     auto loadModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {

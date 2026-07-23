@@ -301,54 +301,67 @@ g.DrawLine(accent, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, r * 0.14f);
 g.DrawLine(namtheme::BG, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, 1.2f);
 }
 
-// Draw text centred in a rect with fixed extra letter-spacing (iPlug's IText
-// has no tracking, so we place each glyph by hand).
-static void DrawSpacedText(IGraphics& g, const char* str, IText text, const IRECT& rect, float spacing)
+// Measure the width of a string drawn with fixed extra letter-spacing.
+static float SpacedTextWidth(IGraphics& g, const char* str, IText text, float spacing)
 {
 const int n = (int)strlen(str);
-if (n <= 0)
-return;
 IText m = text;
 m.mAlign = EAlign::Near;
-float w[96];
 float total = 0.0f;
 for (int i = 0; i < n && i < 96; i++)
 {
 char c[2] = {str[i], 0};
 IRECT r;
 g.MeasureText(m, c, r);
-w[i] = r.W();
-total += w[i] + (i > 0 ? spacing : 0.0f);
+total += r.W() + (i > 0 ? spacing : 0.0f);
 }
-float x = rect.MW() - 0.5f * total;
+return total;
+}
+
+// Draw text left-aligned from startX with fixed extra letter-spacing (iPlug's
+// IText has no tracking, so we place each glyph by hand).
+static void DrawSpacedText(IGraphics& g, const char* str, IText text, float startX, float top, float bottom,
+float spacing)
+{
+const int n = (int)strlen(str);
+IText m = text;
+m.mAlign = EAlign::Near;
+float x = startX;
 for (int i = 0; i < n && i < 96; i++)
 {
 char c[2] = {str[i], 0};
-g.DrawText(m, c, IRECT(x, rect.T, x + w[i] + 6.0f, rect.B));
-x += w[i] + spacing;
+IRECT r;
+g.MeasureText(m, c, r);
+g.DrawText(m, c, IRECT(x, top, x + r.W() + 6.0f, bottom));
+x += r.W() + spacing;
 }
 }
 
 void Draw(IGraphics& g) override
 {
 const IColor accent = namtheme::Accent();
-// Stacked + centred: Z sigil logo on top, AMPRYX wordmark below, subtitle below.
-const float sig = 56.0f;
-const IRECT sigBox(mRECT.MW() - 0.5f * sig, mRECT.T, mRECT.MW() + 0.5f * sig, mRECT.T + sig);
+// Beside layout: Z sigil logo to the LEFT of the AMPRYX wordmark; the subtitle
+// sits under the wordmark, left-aligned with it. The whole block is centred.
+const float sig = 58.0f;
+const float gap = 16.0f;
+IText mark(30.0f, namtheme::TEXT_MAIN, namtheme::kFontWordmark, EAlign::Near, EVAlign::Middle);
+const float markW = SpacedTextWidth(g, "AMPRYX", mark, 6.0f);
+const float blockW = sig + gap + markW;
+const float x0 = mRECT.MW() - 0.5f * blockW;
+
+const IRECT sigBox(x0, mRECT.MH() - 0.5f * sig, x0 + sig, mRECT.MH() + 0.5f * sig);
 DrawSigil(g, sigBox, accent);
 
-const IRECT wordRect(mRECT.L, sigBox.B + 1.0f, mRECT.R, sigBox.B + 39.0f);
-IText mark(30.0f, namtheme::TEXT_MAIN, namtheme::kFontWordmark, EAlign::Center, EVAlign::Middle);
-// Subtle chromatic-split shadow, like the mock, then the wordmark -- both
-// with wide letter-spacing (Archivo Bold).
+const float tx = sigBox.R + gap;
+const float wordTop = mRECT.MH() - 21.0f, wordBot = mRECT.MH() + 5.0f;
+// Subtle chromatic-split shadow, then the wordmark.
 IText markL = mark;
 markL.mFGColor = accent.WithOpacity(0.30f);
-DrawSpacedText(g, "AMPRYX", markL, wordRect.GetHShifted(-1.5f), 12.0f);
-DrawSpacedText(g, "AMPRYX", mark, wordRect, 12.0f);
+DrawSpacedText(g, "AMPRYX", markL, tx - 1.5f, wordTop, wordBot, 6.0f);
+DrawSpacedText(g, "AMPRYX", mark, tx, wordTop, wordBot, 6.0f);
 
-IText sub(8.0f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Center, EVAlign::Middle);
-DrawSpacedText(g, "NEURAL AMP MODELER",
-sub, IRECT(mRECT.L, wordRect.B + 1.0f, mRECT.R, wordRect.B + 14.0f), 4.0f);
+IText sub(8.0f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
+DrawSpacedText(g, "NEURAL AMP MODELER", sub, tx, wordBot - 1.0f, wordBot + 12.0f, 4.0f);
 }
 };
 
