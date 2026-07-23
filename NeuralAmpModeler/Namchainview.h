@@ -42,7 +42,7 @@ public:
     const bool hasB = PLUG()->UnitHasB(unit);
     const double morph = PLUG()->GetUnitMorph(unit);
 
-    const IRECT knobBox = mRECT.GetReducedFromBottom(20.0f);
+    const IRECT knobBox = mRECT.GetReducedFromTop(16.0f).GetReducedFromBottom(22.0f);
     const float d = std::min(knobBox.W(), knobBox.H());
     const IRECT sq = knobBox.GetCentredInside(d);
     const float cx = sq.MW(), cy = sq.MH();
@@ -89,15 +89,18 @@ public:
       g.DrawText(plus, "+", fill);
     }
 
-    const IText label(12.0f, hasB ? accent : namtheme::TEXT_DIM, namtheme::kFontBold, EAlign::Center, EVAlign::Middle);
-    g.DrawText(label, "MORPH", mRECT.GetFromBottom(18.0f).GetFromTop(11.0f));
+    // AMPRYX mock: "MORPH" sits in the TOP label row (with INPUT/GATE/...)
+    // and the value / "ADD B" hint sits in the bottom value row.
+    const IText label(
+      11.0f, hasB ? accent : namtheme::TEXT_DIM, namtheme::kFontMonoBold, EAlign::Center, EVAlign::Middle);
+    g.DrawText(label, "MORPH", mRECT.GetFromTop(14.0f));
     char sub[24];
     if (hasB)
       snprintf(sub, sizeof(sub), "%.0f%%", morph * 100.0);
     else
       snprintf(sub, sizeof(sub), "ADD B");
-    const IText subText(8.0f, namtheme::TEXT_FAINT, namtheme::kFontBody, EAlign::Center, EVAlign::Middle);
-    g.DrawText(subText, sub, mRECT.GetFromBottom(9.0f));
+    const IText subText(9.0f, namtheme::TEXT_FAINT, namtheme::kFontMono, EAlign::Center, EVAlign::Middle);
+    g.DrawText(subText, sub, mRECT.GetFromBottom(16.0f));
   }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
@@ -1585,8 +1588,8 @@ public:
     const int editUnit = PLUG()->mChainEditSlot;
     const bool editing = editUnit >= 0;
 
-    // AMPRYX: square button. Editing = gold fill; otherwise near-black with a
-    // thin gold border.
+    // AMPRYX: slim square button. Editing = gold fill; otherwise near-black
+    // with a thin gold border.
     if (editing)
     {
       g.FillRect(mMouseIsOver ? accent : accent.WithOpacity(0.85f), mRECT);
@@ -1596,30 +1599,30 @@ public:
       g.FillRect(namtheme::PANEL2, mRECT);
       if (mMouseIsOver)
         g.FillRect(accent.WithOpacity(0.10f), mRECT);
-      g.DrawRect(mMouseIsOver ? accent : accent.WithOpacity(0.55f), mRECT.GetPadded(-0.5f), nullptr, 1.4f);
+      g.DrawRect(mMouseIsOver ? accent : accent.WithOpacity(0.55f), mRECT.GetPadded(-0.5f), nullptr, 1.0f);
     }
 
     // Stacked-rack (hamburger) icon on the left -- solid gold bars.
-    const IRECT icon = mRECT.GetFromLeft(34.0f).GetCentredInside(15.0f, 13.0f);
+    const IRECT icon = mRECT.GetFromLeft(24.0f).GetCentredInside(12.0f, 10.0f);
     const IColor iconColor = editing ? namtheme::BG : accent;
     for (int i = 0; i < 3; i++)
     {
-      const float yy = icon.T + i * 5.5f;
-      g.FillRect(iconColor, IRECT(icon.L, yy, icon.R, yy + 2.2f));
+      const float yy = icon.T + i * 4.0f;
+      g.FillRect(iconColor, IRECT(icon.L, yy, icon.R, yy + 1.8f));
     }
 
     // Label (JetBrains Mono, cream)
-    const IRECT textArea = mRECT.GetReducedFromLeft(34.0f).GetReducedFromRight(10.0f);
+    const IRECT textArea = mRECT.GetReducedFromLeft(24.0f).GetReducedFromRight(6.0f);
     if (editing)
     {
-      const IText mainText(10.0f, namtheme::BG, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
+      const IText mainText(8.5f, namtheme::BG, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
       char label[32];
       snprintf(label, sizeof(label), "BACK TO RACK (%d)", editUnit == 0 ? 1 : editUnit + 1);
       g.DrawText(mainText, label, textArea);
     }
     else
     {
-      const IText mainText(11.0f, namtheme::TEXT_MAIN, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
+      const IText mainText(9.5f, namtheme::TEXT_MAIN, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
       g.DrawText(mainText, "SIGNAL CHAIN", textArea);
     }
   }

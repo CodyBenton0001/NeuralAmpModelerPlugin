@@ -189,19 +189,18 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto mainB = rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight + kFavoritesBarHeight);
     const auto mainArea = mainB.GetPadded(-20);
     const auto contentArea = mainArea.GetPadded(-10);
-    // AMPRYX skin: single-row header (sigil logo beside the AMPRYX wordmark,
-    // flanked by the TONE3000 and SIGNAL CHAIN buttons).
-    const auto titleHeight = 66.0f;
-    const auto titleArea = contentArea.GetFromTop(titleHeight);
+    // AMPRYX skin: compact single-row header hugging the top of the panel
+    // (sigil logo beside the AMPRYX wordmark, flanked by the TONE3000 and
+    // SIGNAL CHAIN buttons). Proportions measured off the reference.
+    const auto titleArea = mainB.GetFromTop(64.0f);
 
-    // Areas for knobs
+    // Areas for knobs (shifted down past the compact header row).
     const auto knobsPad = 20.0f;
-    const auto knobsExtraSpaceBelowTitle = 25.0f;
     const auto singleKnobPad = -2.0f;
     const auto knobsArea = contentArea.GetFromTop(NAM_KNOB_HEIGHT)
                              .GetReducedFromLeft(knobsPad)
                              .GetReducedFromRight(knobsPad)
-                             .GetVShifted(titleHeight + knobsExtraSpaceBelowTitle);
+                             .GetVShifted(46.0f);
     // Tone Morph: one extra knob cell on the right of the row for the MORPH knob.
     const int kKnobCols = numKnobs + 1;
     const auto inputKnobArea = knobsArea.GetGridCell(0, kInputLevel, 1, kKnobCols).GetPadded(-singleKnobPad);
@@ -243,13 +242,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto outputMeterArea =
       IRECT(knobPanelRect.R + 8.0f, knobPanelRect.T, knobPanelRect.R + 26.0f, knobPanelRect.B);
 
-    // AMPRYX header buttons: compact square TONE3000 (left) + SIGNAL CHAIN
-    // (right), vertically centred on the logo row (kept clear of the centre
-    // logo, which spans ~220px of the ~540px content width).
-    const float kHdrBtnH = 44.0f;
-    const IRECT t3kButtonArea(contentArea.L, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.L + 130.0f,
+    // AMPRYX header buttons: slim square TONE3000 (left) + SIGNAL CHAIN
+    // (right), vertically centred on the logo row. Sized off the reference
+    // (~90/110 x 26 at this panel width).
+    const float kHdrBtnH = 26.0f;
+    const IRECT t3kButtonArea(contentArea.L, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.L + 92.0f,
                               titleArea.MH() + 0.5f * kHdrBtnH);
-    const IRECT chainButtonArea(contentArea.R - 148.0f, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.R,
+    const IRECT chainButtonArea(contentArea.R - 112.0f, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.R,
                                 titleArea.MH() + 0.5f * kHdrBtnH);
 
     // Model loader button

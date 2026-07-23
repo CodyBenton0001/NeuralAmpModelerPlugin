@@ -2107,21 +2107,21 @@ public:
   {
     const IColor accent = tonegallery::AccentColor();
 
-    // AMPRYX: square button, near-black fill, thin gold border.
+    // AMPRYX: slim square button, near-black fill, thin gold border.
     g.FillRect(IColor(255, 15, 13, 8), mRECT);
     if (mMouseIsOver)
       g.FillRect(accent.WithOpacity(0.10f), mRECT);
-    g.DrawRect(mMouseIsOver ? accent : accent.WithOpacity(0.55f), mRECT.GetPadded(-0.5f), nullptr, 1.4f);
+    g.DrawRect(mMouseIsOver ? accent : accent.WithOpacity(0.55f), mRECT.GetPadded(-0.5f), nullptr, 1.0f);
 
     // Globe icon on the left
-    const IRECT globe = mRECT.GetFromLeft(40.0f).GetCentredInside(16.0f);
-    g.DrawEllipse(accent, globe, nullptr, 1.5f);
-    g.DrawEllipse(accent, globe.GetMidHPadded(4.0f), nullptr, 1.1f);
-    g.DrawLine(accent, globe.L, globe.MH(), globe.R, globe.MH(), nullptr, 1.1f);
+    const IRECT globe = mRECT.GetFromLeft(26.0f).GetCentredInside(12.0f);
+    g.DrawEllipse(accent, globe, nullptr, 1.2f);
+    g.DrawEllipse(accent, globe.GetMidHPadded(3.0f), nullptr, 0.9f);
+    g.DrawLine(accent, globe.L, globe.MH(), globe.R, globe.MH(), nullptr, 0.9f);
 
     // Single-line label: TONE3000 (JetBrains Mono, per the reference)
-    const IRECT textArea = mRECT.GetReducedFromLeft(40.0f).GetReducedFromRight(10.0f);
-    const IText brandText(12.0f, IColor(255, 236, 230, 212), "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
+    const IRECT textArea = mRECT.GetReducedFromLeft(26.0f).GetReducedFromRight(6.0f);
+    const IText brandText(9.5f, IColor(255, 236, 230, 212), "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
     g.DrawText(brandText, "TONE3000", textArea);
   }
 
