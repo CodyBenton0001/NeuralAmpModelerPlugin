@@ -496,17 +496,20 @@ public:
 
     // Header: title + the rig preset bar
     const IRECT header = mRECT.GetFromTop(kChainHeaderHeight);
-    const IText titleText(13.0f, namtheme::TEXT_MAIN, "Inter-Bold", EAlign::Near, EVAlign::Middle);
-    g.DrawText(titleText, "SIGNAL CHAIN", header.GetReducedFromLeft(16.0f));
+    g.FillRect(namtheme::PANEL2, header);
+    g.FillRect(namtheme::GOLD.WithOpacity(0.55f), header.GetFromBottom(1.0f));
+    const IText titleText(12.0f, namtheme::TEXT_MAIN, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
+    namtheme::DrawSpacedText(g, "SIGNAL CHAIN", titleText, header.L + 16.0f, header.T, header.B, 1.6f);
     DrawPresetBar(g, accent);
 
-    // Exit (expand) button
+    // Exit (collapse) button -- square, gold, matching the footer icon.
     const IRECT expand = ExpandRect();
     if (mMouseOverExpand)
-      g.FillRoundRect(PluginColors::MOUSEOVER, expand, 5.0f);
-    g.DrawRoundRect(namtheme::TEXT_DIM, expand.GetCentredInside(13.0f), 2.0f, nullptr, 1.4f);
-    const IRECT xInner = expand.GetCentredInside(13.0f);
-    g.DrawLine(namtheme::TEXT_DIM, xInner.L + 3.0f, xInner.MH(), xInner.R - 3.0f, xInner.MH(), nullptr, 1.2f);
+      g.FillRect(PluginColors::MOUSEOVER, expand);
+    const IColor xc = mMouseOverExpand ? namtheme::TEXT_MAIN : accent;
+    const IRECT xInner = expand.GetCentredInside(12.0f, 9.0f);
+    g.DrawRect(xc, xInner, nullptr, 1.1f);
+    g.DrawLine(xc, xInner.L + 2.5f, xInner.MH(), xInner.R - 2.5f, xInner.MH(), nullptr, 1.1f);
 
     // Units
     for (int i = 0; i < kNumUnits; i++)
@@ -827,12 +830,12 @@ private:
 
   void DrawPresetBar(IGraphics& g, const IColor& accent)
   {
+    // AMPRYX: square boxes, near-black fill, thin gold border.
     auto pill = [&](const IRECT& r, bool hover, bool accented) {
-      g.FillRoundRect(IColor(255, 32, 33, 41), r, r.H() * 0.5f);
+      g.FillRect(namtheme::PANEL2, r);
       if (hover)
-        g.DrawRoundRect(accent, r, r.H() * 0.5f);
-      else
-        g.DrawRoundRect(IColor(30, 255, 255, 255), r, r.H() * 0.5f);
+        g.FillRect(accent.WithOpacity(0.10f), r);
+      g.DrawRect(hover ? accent : accent.WithOpacity(0.45f), r.GetPadded(-0.5f), nullptr, 1.0f);
       (void)accented;
     };
     const IColor dim = namtheme::TEXT_DIM;
@@ -842,9 +845,9 @@ private:
     pill(NextRect(), mBarHover == 1, false);
     {
       const IRECT p = PrevRect().GetCentredInside(8.0f);
-      g.FillTriangle(mBarHover == 0 ? COLOR_WHITE : dim, p.R, p.T, p.R, p.B, p.L, p.MH());
+      g.FillTriangle(mBarHover == 0 ? namtheme::TEXT_MAIN : accent, p.R, p.T, p.R, p.B, p.L, p.MH());
       const IRECT n = NextRect().GetCentredInside(8.0f);
-      g.FillTriangle(mBarHover == 1 ? COLOR_WHITE : dim, n.L, n.T, n.L, n.B, n.R, n.MH());
+      g.FillTriangle(mBarHover == 1 ? namtheme::TEXT_MAIN : accent, n.L, n.T, n.L, n.B, n.R, n.MH());
     }
 
     // Preset name dropdown
@@ -852,7 +855,8 @@ private:
     pill(name, mBarHover == 2, false);
     const std::string disp = namrig::PresetDisplayName(PLUG()->mRigPresetRel.Get());
     const bool none = disp == "No preset";
-    const IText nameText(10.0f, none ? namtheme::TEXT_FAINT : COLOR_WHITE, "Inter-Bold", EAlign::Near, EVAlign::Middle);
+    const IText nameText(
+      10.0f, none ? namtheme::TEXT_FAINT : namtheme::TEXT_MAIN, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
     g.DrawText(
       nameText, tonegallery::Ellipsize(disp, 32).c_str(), name.GetReducedFromLeft(12.0f).GetReducedFromRight(20.0f));
     // chevron
@@ -862,24 +866,24 @@ private:
     // SAVE / SAVE AS
     pill(SaveRect(), mBarHover == 3, false);
     pill(SaveAsRect(), mBarHover == 4, false);
-    const IText btnText(8.5f, dim, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+    const IText btnText(8.5f, namtheme::TEXT_MAIN, "JetBrainsMono-Bold", EAlign::Center, EVAlign::Middle);
     IText saveText = btnText;
     if (mBarHover == 3)
-      saveText.mFGColor = COLOR_WHITE;
+      saveText.mFGColor = accent;
     g.DrawText(saveText, "SAVE", SaveRect());
     IText saveAsText = btnText;
     if (mBarHover == 4)
-      saveAsText.mFGColor = COLOR_WHITE;
+      saveAsText.mFGColor = accent;
     g.DrawText(saveAsText, "SAVE AS", SaveAsRect());
 
     // Share (box with an up arrow)
     {
       const IRECT r = ShareRect();
       if (mBarHover == 5)
-        g.FillRoundRect(PluginColors::MOUSEOVER, r, 4.0f);
-      const IColor c = mBarHover == 5 ? COLOR_WHITE : dim;
+        g.FillRect(PluginColors::MOUSEOVER, r);
+      const IColor c = mBarHover == 5 ? namtheme::TEXT_MAIN : accent;
       const IRECT box = r.GetCentredInside(12.0f).GetReducedFromTop(3.0f);
-      g.DrawRoundRect(c, box, 1.5f, nullptr, 1.2f);
+      g.DrawRect(c, box, nullptr, 1.2f);
       const float mx = r.MW();
       g.DrawLine(c, mx, box.T - 4.0f, mx, box.T + 3.0f, nullptr, 1.2f);
       g.DrawLine(c, mx - 3.0f, box.T - 1.0f, mx, box.T - 4.0f, nullptr, 1.2f);
@@ -889,8 +893,8 @@ private:
     {
       const IRECT r = SearchRect();
       if (mBarHover == 6)
-        g.FillRoundRect(PluginColors::MOUSEOVER, r, 4.0f);
-      const IColor c = mBarHover == 6 ? COLOR_WHITE : dim;
+        g.FillRect(PluginColors::MOUSEOVER, r);
+      const IColor c = mBarHover == 6 ? namtheme::TEXT_MAIN : accent;
       const IRECT m = r.GetCentredInside(12.0f);
       g.DrawEllipse(c, m.GetFromTLHC(8.0f, 8.0f), nullptr, 1.4f);
       g.DrawLine(c, m.L + 7.0f, m.T + 7.0f, m.R, m.B, nullptr, 1.4f);
@@ -1219,28 +1223,10 @@ private:
   {
     const IRECT face = UnitRect(i);
 
-    // Faceplate
-    g.PathRect(face);
-    g.PathFill(IPattern::CreateLinearGradient(
-      face.L, face.T, face.L, face.B,
-      {{IColor(255, 30, 31, 36), 0.0f}, {IColor(255, 20, 21, 25), 0.35f}, {IColor(255, 16, 17, 20), 1.0f}}));
-    g.FillRect(IColor(30, 255, 255, 255), face.GetFromTop(1.0f));
-    g.FillRect(COLOR_BLACK.WithOpacity(0.5f), face.GetFromBottom(2.0f));
-
-    // Rack ears + screws
-    for (int side = 0; side < 2; side++)
-    {
-      const IRECT ear = side == 0 ? face.GetFromLeft(24.0f) : face.GetFromRight(24.0f);
-      g.FillRect(IColor(255, 24, 25, 29), ear);
-      g.FillRect(IColor(20, 255, 255, 255), side == 0 ? ear.GetFromRight(1.0f) : ear.GetFromLeft(1.0f));
-      for (int screw = 0; screw < 2; screw++)
-      {
-        const IRECT sr = (screw == 0 ? ear.GetFromTop(24.0f) : ear.GetFromBottom(24.0f)).GetCentredInside(10.0f);
-        g.FillEllipse(IColor(255, 48, 50, 58), sr);
-        g.DrawEllipse(COLOR_BLACK.WithOpacity(0.6f), sr);
-        g.DrawLine(IColor(255, 90, 93, 104), sr.L + 2.0f, sr.MH(), sr.R - 2.0f, sr.MH(), nullptr, 1.2f);
-      }
-    }
+    // AMPRYX faceplate: flat near-black panel with a gold rule underneath
+    // (the skeuomorphic rack ears + screws are gone).
+    g.FillRect(namtheme::PANEL2, face);
+    g.FillRect(namtheme::GOLD.WithOpacity(0.35f), face.GetFromBottom(1.0f));
 
     const bool enabled = GetUnitEnabled(i);
 
@@ -1291,8 +1277,8 @@ private:
 
     // LCD screen
     const IRECT screen = ScreenRect(i);
-    g.FillRoundRect(COLOR_BLACK, screen.GetPadded(3.0f), 5.0f);
-    g.DrawRoundRect(IColor(40, 255, 255, 255), screen.GetPadded(3.0f), 5.0f);
+    g.FillRect(namtheme::BG, screen.GetPadded(3.0f));
+    g.DrawRect(accent.WithOpacity(haveTone ? 0.85f : 0.35f), screen.GetPadded(3.0f), nullptr, haveTone ? 2.0f : 1.0f);
     IBitmap* pBitmap = pEntry != nullptr ? GetImage(pEntry->imagePath) : nullptr;
     if (pBitmap != nullptr && pBitmap->W() > 0 && pBitmap->H() > 0)
     {
@@ -1313,7 +1299,7 @@ private:
     }
     else if (haveTone)
     {
-      g.FillRoundRect(accent.WithOpacity(0.10f), screen, 4.0f);
+      g.FillRect(accent.WithOpacity(0.10f), screen);
       const IText initText(20.0f, accent, "Inter-Bold", EAlign::Center, EVAlign::Middle);
       std::string initials;
       const std::string nm = pEntry != nullptr ? pEntry->name : fallbackName;
@@ -1341,7 +1327,7 @@ private:
 
     // Hover ring around the choose region
     if (mMouseOverChoose == i && haveTone)
-      g.DrawRoundRect(accent.WithOpacity(0.7f), screen.GetPadded(3.0f), 5.0f, nullptr, 1.4f);
+      g.DrawRect(accent.WithOpacity(0.7f), screen.GetPadded(3.0f), nullptr, 1.4f);
 
     // Name / gear / author
     const IRECT text = TextRect(i);
@@ -1379,7 +1365,7 @@ private:
       const char* gearLabel = tonegallery::GearTypeChipLabel(pEntry->gearType);
       const float gw = 10.0f + 4.6f * (float)strlen(gearLabel);
       const IRECT chip = IRECT(text.L, ty, text.L + gw, ty + 13.0f);
-      g.FillRoundRect(enabled ? gearColor : IColor(255, 60, 62, 70), chip, 5.0f);
+      g.FillRect(enabled ? gearColor : IColor(255, 60, 62, 70), chip);
       const IText chipText(6.5f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
       g.DrawText(chipText, gearLabel, chip);
       if (!pEntry->author.empty())
