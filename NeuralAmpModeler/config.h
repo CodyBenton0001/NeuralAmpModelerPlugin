@@ -76,6 +76,7 @@
 #define JETBRAINS_MEDIUM_FN "JetBrainsMono-Medium.ttf"
 #define JETBRAINS_BOLD_FN "JetBrainsMono-Bold.ttf"
 #define ARCHIVO_BLACK_FN "ArchivoBlack-Regular.ttf"
+#define ARCHIVO_BOLD_FN "Archivo-Bold.ttf"
 
 #define GEAR_FN "Gear.svg"
 #define FILE_FN "File.svg"
@@ -114,6 +115,8 @@
 // AMPRYX skin: halftone-engraving background textures (knob panel + A/B cards).
 #define ASCII_HERO_FN "AsciiHero.png"
 #define ASCII_TONEA_FN "AsciiToneA.png"
+// AMPRYX skin: the Z sigil logo (drawn in the title instead of a vector glyph).
+#define ZSIGIL_FN "ZSigil.png"
 
 // Issue 291
 // On the macOS standalone, we might not have permissions to traverse the file directory, so we have the app ask the

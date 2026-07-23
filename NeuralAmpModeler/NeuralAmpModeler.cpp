@@ -146,6 +146,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     loadFontFB(namtheme::kFontMonoMed, JETBRAINS_MEDIUM_FN, JETBRAINS_FN, INTER_FN);
     loadFontFB(namtheme::kFontMonoBold, JETBRAINS_BOLD_FN, INTER_BOLD_FN, ROBOTO_FN);
     loadFontFB(namtheme::kFontDisplay, ARCHIVO_BLACK_FN, INTER_BOLD_FN, ROBOTO_FN);
+    loadFontFB(namtheme::kFontWordmark, ARCHIVO_BOLD_FN, ARCHIVO_BLACK_FN, INTER_BOLD_FN);
 
     const auto gearSVG = pGraphics->LoadSVG(GEAR_FN);
     const auto fileSVG = pGraphics->LoadSVG(FILE_FN);
@@ -168,6 +169,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // AMPRYX skin: halftone-engraving textures behind the knob panel + A/B cards.
     const auto asciiHeroBitmap = pGraphics->LoadBitmap(ASCII_HERO_FN);
     const auto asciiToneABitmap = pGraphics->LoadBitmap(ASCII_TONEA_FN);
+    // AMPRYX skin: the Z sigil logo used by the title control.
+    ThemedTitleControl::sSigilBitmap = pGraphics->LoadBitmap(ZSIGIL_FN);
 
     const auto b = pGraphics->GetBounds();
     // Window regions: tone sidebar on the left, favorites bar under the main

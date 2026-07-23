@@ -1585,39 +1585,41 @@ public:
     const int editUnit = PLUG()->mChainEditSlot;
     const bool editing = editUnit >= 0;
 
-    // Button body
+    // AMPRYX: square button. Editing = gold fill; otherwise near-black with a
+    // thin gold border.
     if (editing)
     {
-      g.FillRoundRect(mMouseIsOver ? accent : accent.WithOpacity(0.85f), mRECT, mRECT.H() * 0.5f);
+      g.FillRect(mMouseIsOver ? accent : accent.WithOpacity(0.85f), mRECT);
     }
     else
     {
-      g.FillRoundRect(IColor(255, 32, 33, 41), mRECT, mRECT.H() * 0.5f);
-      g.DrawRoundRect(mMouseIsOver ? accent : IColor(30, 255, 255, 255), mRECT, mRECT.H() * 0.5f);
+      g.FillRect(namtheme::PANEL2, mRECT);
+      if (mMouseIsOver)
+        g.FillRect(accent.WithOpacity(0.10f), mRECT);
+      g.DrawRect(mMouseIsOver ? accent : accent.WithOpacity(0.55f), mRECT.GetPadded(-0.5f), nullptr, 1.4f);
     }
 
-    // Stacked-rack icon on the left
-    const IRECT icon = mRECT.GetFromLeft(30.0f).GetCentredInside(13.0f, 13.0f);
-    const IColor iconColor = editing ? COLOR_BLACK : (mMouseIsOver ? COLOR_WHITE : namtheme::TEXT_DIM);
+    // Stacked-rack (hamburger) icon on the left -- solid gold bars.
+    const IRECT icon = mRECT.GetFromLeft(34.0f).GetCentredInside(15.0f, 13.0f);
+    const IColor iconColor = editing ? namtheme::BG : accent;
     for (int i = 0; i < 3; i++)
     {
-      const float yy = icon.T + i * 5.0f;
-      g.DrawRoundRect(iconColor, IRECT(icon.L, yy, icon.R, yy + 3.2f), 1.0f, nullptr, 1.2f);
+      const float yy = icon.T + i * 5.5f;
+      g.FillRect(iconColor, IRECT(icon.L, yy, icon.R, yy + 2.2f));
     }
 
-    // Label
-    const IRECT textArea = mRECT.GetReducedFromLeft(28.0f).GetReducedFromRight(8.0f);
+    // Label (JetBrains Mono, cream)
+    const IRECT textArea = mRECT.GetReducedFromLeft(34.0f).GetReducedFromRight(10.0f);
     if (editing)
     {
-      const IText mainText(9.0f, COLOR_BLACK, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      const IText mainText(10.0f, namtheme::BG, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
       char label[32];
       snprintf(label, sizeof(label), "BACK TO RACK (%d)", editUnit == 0 ? 1 : editUnit + 1);
       g.DrawText(mainText, label, textArea);
     }
     else
     {
-      const IText mainText(
-        9.0f, mMouseIsOver ? COLOR_WHITE : namtheme::TEXT_MAIN, "Inter-Bold", EAlign::Center, EVAlign::Middle);
+      const IText mainText(11.0f, namtheme::TEXT_MAIN, "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
       g.DrawText(mainText, "SIGNAL CHAIN", textArea);
     }
   }

@@ -46,6 +46,7 @@ const char* const kFontMono = "JetBrainsMono-Regular";
 const char* const kFontMonoMed = "JetBrainsMono-Medium";
 const char* const kFontMonoBold = "JetBrainsMono-Bold";
 const char* const kFontDisplay = "ArchivoBlack";
+const char* const kFontWordmark = "Archivo-Bold"; // AMPRYX wordmark (spaced bold)
 } // namespace namtheme
 
 // A card panel (background layer). AMPRYX skin uses square corners (radius ~0)
@@ -260,9 +261,18 @@ ThemedTitleControl(const IRECT& bounds)
 mIgnoreMouse = true;
 }
 
+// The uploaded Z sigil logo (set from the layout); when present it replaces
+// the vector fallback drawn below.
+inline static IBitmap sSigilBitmap;
+
 // Draw the Z sigil roundel centred in the given square.
 static void DrawSigil(IGraphics& g, const IRECT& box, const IColor& accent)
 {
+if (sSigilBitmap.W() > 0 && sSigilBitmap.H() > 0)
+{
+g.DrawFittedBitmap(sSigilBitmap, box.GetCentredInside(std::min(box.W(), box.H())));
+return;
+}
 const float cx = box.MW(), cy = box.MH();
 const float r = 0.5f * std::min(box.W(), box.H());
 // Dotted outer ring: fine round dots around the circle (the mock's roundel).
@@ -322,23 +332,23 @@ x += w[i] + spacing;
 void Draw(IGraphics& g) override
 {
 const IColor accent = namtheme::Accent();
-// Stacked + centred: Z sigil on top, AMPRYX wordmark below, subtitle below.
-const float sig = 42.0f;
+// Stacked + centred: Z sigil logo on top, AMPRYX wordmark below, subtitle below.
+const float sig = 56.0f;
 const IRECT sigBox(mRECT.MW() - 0.5f * sig, mRECT.T, mRECT.MW() + 0.5f * sig, mRECT.T + sig);
 DrawSigil(g, sigBox, accent);
 
-const IRECT wordRect(mRECT.L, sigBox.B + 2.0f, mRECT.R, sigBox.B + 40.0f);
-IText mark(30.0f, namtheme::TEXT_MAIN, namtheme::kFontDisplay, EAlign::Center, EVAlign::Middle);
+const IRECT wordRect(mRECT.L, sigBox.B + 1.0f, mRECT.R, sigBox.B + 39.0f);
+IText mark(30.0f, namtheme::TEXT_MAIN, namtheme::kFontWordmark, EAlign::Center, EVAlign::Middle);
 // Subtle chromatic-split shadow, like the mock, then the wordmark -- both
-// with wide letter-spacing.
+// with wide letter-spacing (Archivo Bold).
 IText markL = mark;
 markL.mFGColor = accent.WithOpacity(0.30f);
-DrawSpacedText(g, "AMPRYX", markL, wordRect.GetHShifted(-1.5f), 10.0f);
-DrawSpacedText(g, "AMPRYX", mark, wordRect, 10.0f);
+DrawSpacedText(g, "AMPRYX", markL, wordRect.GetHShifted(-1.5f), 12.0f);
+DrawSpacedText(g, "AMPRYX", mark, wordRect, 12.0f);
 
 IText sub(8.0f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Center, EVAlign::Middle);
-DrawSpacedText(g, "NEURAL AMP MODELER  \xC2\xB7  NIGHTFALL",
-sub, IRECT(mRECT.L, wordRect.B + 1.0f, mRECT.R, wordRect.B + 14.0f), 3.0f);
+DrawSpacedText(g, "NEURAL AMP MODELER",
+sub, IRECT(mRECT.L, wordRect.B + 1.0f, mRECT.R, wordRect.B + 14.0f), 4.0f);
 }
 };
 
