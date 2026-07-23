@@ -386,10 +386,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachPanelBackground(namtheme::BG);
     pGraphics->AttachControl(new AmpryxDotGridControl(b));
     const auto knobCardArea = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
-    pGraphics->AttachControl(new ThemedCardControl(knobCardArea, namtheme::PANEL2, 0.0f, namtheme::BORDER, 2.0f));
+    pGraphics->AttachControl(new ThemedCardControl(knobCardArea, namtheme::PANEL2, 0.0f, namtheme::Border(), 2.0f, true));
     pGraphics->AttachControl(new AmpryxTextureControl(knobCardArea.GetPadded(-2.0f), asciiHeroBitmap, 0.42f));
     // The toggle bar's square gold-bordered background (behind the four switches).
-    pGraphics->AttachControl(new ThemedCardControl(toggleBar, namtheme::CARD, 0.0f, namtheme::BORDER, 2.0f));
+    pGraphics->AttachControl(new ThemedCardControl(toggleBar, namtheme::CARD, 0.0f, namtheme::Border(), 2.0f, true));
     // Stacked logo, centred across the full content width (the TONE3000 and
     // SIGNAL CHAIN buttons sit at the top corners, drawn on top).
     pGraphics->AttachControl(new ThemedTitleControl(IRECT(contentArea.L, titleArea.T, contentArea.R, titleArea.B)));

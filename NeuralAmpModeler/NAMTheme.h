@@ -110,29 +110,34 @@ i += len;
 class ThemedCardControl : public IControl
 {
 public:
+// accentBorder: resolve the border from the runtime accent at DRAW time, so the
+// colour picker re-tints it (a stored IColor would freeze the accent that was
+// current when the layout was built).
 ThemedCardControl(const IRECT& bounds, const IColor& color, float radius, const IColor& border,
-float borderWidth = 2.0f)
+float borderWidth = 2.0f, bool accentBorder = false)
 : IControl(bounds)
 , mColor(color)
 , mRadius(radius)
 , mBorder(border)
 , mBorderWidth(borderWidth)
+, mAccentBorder(accentBorder)
 {
 mIgnoreMouse = true;
 }
 
 void Draw(IGraphics& g) override
 {
+const IColor border = mAccentBorder ? namtheme::Border() : mBorder;
 if (mRadius <= 0.5f)
 {
 g.FillRect(mColor, mRECT);
 // Inset the stroke by half its width so the 2px border sits fully inside.
-g.DrawRect(mBorder, mRECT.GetPadded(-0.5f * mBorderWidth), &mBlend, mBorderWidth);
+g.DrawRect(border, mRECT.GetPadded(-0.5f * mBorderWidth), &mBlend, mBorderWidth);
 }
 else
 {
 g.FillRoundRect(mColor, mRECT, mRadius);
-g.DrawRoundRect(mBorder, mRECT.GetPadded(-0.5f * mBorderWidth), mRadius, &mBlend, mBorderWidth);
+g.DrawRoundRect(border, mRECT.GetPadded(-0.5f * mBorderWidth), mRadius, &mBlend, mBorderWidth);
 }
 }
 
@@ -141,6 +146,7 @@ IColor mColor;
 float mRadius;
 IColor mBorder;
 float mBorderWidth;
+bool mAccentBorder;
 };
 
 // Faint gold dotted-grid texture drawn over the whole window (mock:
@@ -499,9 +505,10 @@ bitmap, globeSVG, getButtonLabel, getButtonURL)
 
 void Draw(IGraphics& g) override
 {
-// AMPRYX: square row, near-black fill, solid 2px gold border (per the mock).
+// AMPRYX: square row, near-black fill, solid 2px accent border (per the
+// mock). Resolved at draw time so the colour picker re-tints it.
 g.FillRect(namtheme::PANEL2, mRECT);
-g.DrawRect(mAccent, mRECT.GetPadded(-1.0f), nullptr, 2.0f);
+g.DrawRect(namtheme::Accent(), mRECT.GetPadded(-1.0f), nullptr, 2.0f);
 }
 
 private:
