@@ -231,6 +231,9 @@ public:
   {
   }
 
+  // AMPRYX skin: halftone texture drawn inside each card (set from the layout).
+  void SetTexture(const IBitmap& bitmap) { mTexture = bitmap; }
+
   int FocusUnit() { return PLUG()->mChainEditSlot >= 1 ? PLUG()->mChainEditSlot : 0; }
 
   void SetNowPlaying(const tonegallery::ToneEntry& entry, const std::string& modelPath,
@@ -258,11 +261,35 @@ public:
     const tonegallery::ToneEntry* pEntry = isB ? ResolveB(unit) : ResolveA(unit);
     const bool hasTone = pEntry != nullptr;
 
-    g.FillRoundRect(namtheme::CARD, card, 8.0f);
-    if (active)
-      g.DrawRoundRect(accent, card, 8.0f, nullptr, 1.5f);
-    else
-      g.DrawRoundRect(namtheme::LINE, card, 8.0f);
+    // AMPRYX skin: square card with a gold (active) / hairline (idle) border and
+    // the halftone engraving clipped inside, mirrored on the B side.
+    g.FillRect(namtheme::CARD, card);
+    if (mTexture.W() > 0 && mTexture.H() > 0)
+    {
+      const float bmpAspect = (float)mTexture.W() / (float)mTexture.H();
+      const float areaAspect = card.W() / card.H();
+      IRECT cover = card;
+      if (bmpAspect > areaAspect)
+        cover = card.GetMidHPadded(0.5f * card.H() * bmpAspect);
+      else
+        cover = card.GetMidVPadded(0.5f * card.W() / bmpAspect);
+      g.PathClipRegion(card);
+      if (isB)
+      {
+        g.PathTransformTranslate(cover.L + cover.R, 0.0f);
+        g.PathTransformScale(-1.0f, 1.0f);
+      }
+      IBlend tblend(EBlend::Default, 0.28f);
+      g.DrawFittedBitmap(mTexture, cover, &tblend);
+      if (isB)
+        g.PathTransformReset();
+      g.PathClear();
+      g.PathRect(card);
+      g.PathFill(IPattern::CreateRadialGradient(card.MW(), card.MH(), 0.7f * card.W(),
+                                                {{COLOR_TRANSPARENT, 0.3f}, {namtheme::CARD.WithOpacity(0.8f), 1.0f}}));
+      g.PathClipRegion();
+    }
+    g.DrawRect(active ? accent : namtheme::LINE, card, nullptr, active ? 2.0f : 1.0f);
 
     const IRECT labelRow = card.GetFromTop(16.0f).GetReducedFromLeft(8.0f).GetReducedFromTop(3.0f);
     const IText labelText(
@@ -409,6 +436,7 @@ public:
   }
 
 private:
+  IBitmap mTexture;
   tonegallery::ToneEntry mMainEntry;
   bool mHasMainEntry = false;
   tonegallery::ToneEntry mCache[2];

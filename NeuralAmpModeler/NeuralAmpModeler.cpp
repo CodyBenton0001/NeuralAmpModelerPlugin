@@ -129,11 +129,21 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     pGraphics->LoadFont("Roboto-Regular", ROBOTO_FN);
     pGraphics->LoadFont("Michroma-Regular", MICHROMA_FN);
-    // Modern UI font; fall back to Roboto if the Inter files aren't bundled.
-    if (!pGraphics->LoadFont("Inter-Regular", INTER_FN))
-      pGraphics->LoadFont("Inter-Regular", ROBOTO_FN);
-    if (!pGraphics->LoadFont("Inter-Bold", INTER_BOLD_FN))
-      pGraphics->LoadFont("Inter-Bold", ROBOTO_FN);
+    // AMPRYX skin: the whole UI renders in JetBrains Mono. We register the mono
+    // face under BOTH its own IDs and the legacy "Inter-*" IDs, so every text
+    // style already in the codebase (which references Inter) picks up the mono
+    // face with no per-call changes. Archivo Black is the display/wordmark face.
+    // Each registration falls back to Inter, then Roboto, if a TTF is missing.
+    auto loadFontFB = [&](const char* id, const char* primary, const char* fb1, const char* fb2) {
+      if (!pGraphics->LoadFont(id, primary) && !pGraphics->LoadFont(id, fb1))
+        pGraphics->LoadFont(id, fb2);
+    };
+    loadFontFB("Inter-Regular", JETBRAINS_FN, INTER_FN, ROBOTO_FN);
+    loadFontFB("Inter-Bold", JETBRAINS_BOLD_FN, INTER_BOLD_FN, ROBOTO_FN);
+    loadFontFB(namtheme::kFontMono, JETBRAINS_FN, INTER_FN, ROBOTO_FN);
+    loadFontFB(namtheme::kFontMonoMed, JETBRAINS_MEDIUM_FN, JETBRAINS_FN, INTER_FN);
+    loadFontFB(namtheme::kFontMonoBold, JETBRAINS_BOLD_FN, INTER_BOLD_FN, ROBOTO_FN);
+    loadFontFB(namtheme::kFontDisplay, ARCHIVO_BLACK_FN, INTER_BOLD_FN, ROBOTO_FN);
 
     const auto gearSVG = pGraphics->LoadSVG(GEAR_FN);
     const auto fileSVG = pGraphics->LoadSVG(FILE_FN);
@@ -153,6 +163,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto knobBackgroundBitmap = pGraphics->LoadBitmap(KNOBBACKGROUND_FN);
     const auto switchHandleBitmap = pGraphics->LoadBitmap(SLIDESWITCHHANDLE_FN);
     const auto meterBackgroundBitmap = pGraphics->LoadBitmap(METERBACKGROUND_FN);
+    // AMPRYX skin: halftone-engraving textures behind the knob panel + A/B cards.
+    const auto asciiHeroBitmap = pGraphics->LoadBitmap(ASCII_HERO_FN);
+    const auto asciiToneABitmap = pGraphics->LoadBitmap(ASCII_TONEA_FN);
 
     const auto b = pGraphics->GetBounds();
     // Window regions: tone sidebar on the left, favorites bar under the main
@@ -361,12 +374,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       }
     };
 
-    // Nightfall theme: flat dark window with a rounded card behind the knobs.
+    // AMPRYX skin: near-black window, faint gold dot-grid, square gold-bordered
+    // panels with a halftone-engraving texture behind the knobs.
     pGraphics->AttachPanelBackground(namtheme::BG);
-    pGraphics->AttachControl(
-      new ThemedCardControl(knobsArea.GetHPadded(4.0f).GetVPadded(12.0f), namtheme::PANEL2, 12.0f, namtheme::LINE));
-    // The toggle bar's rounded background (behind the four switches).
-    pGraphics->AttachControl(new ThemedCardControl(toggleBar, namtheme::PANEL2, 10.0f, namtheme::LINE));
+    pGraphics->AttachControl(new AmpryxDotGridControl(b));
+    const auto knobCardArea = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
+    pGraphics->AttachControl(new ThemedCardControl(knobCardArea, namtheme::PANEL2, 0.0f, namtheme::BORDER, 2.0f));
+    pGraphics->AttachControl(new AmpryxTextureControl(knobCardArea.GetPadded(-2.0f), asciiHeroBitmap, 0.5f));
+    // The toggle bar's square gold-bordered background (behind the four switches).
+    pGraphics->AttachControl(new ThemedCardControl(toggleBar, namtheme::CARD, 0.0f, namtheme::BORDER, 2.0f));
     // Title, centered between the TONE3000 and SIGNAL CHAIN buttons.
     pGraphics->AttachControl(
       new ThemedTitleControl(IRECT(t3kButtonArea.R + 8.0f, titleArea.T, chainButtonArea.L - 8.0f, titleArea.B)));
@@ -431,7 +447,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new ThemedKnobControl(outputKnobArea, kOutputLevel, "OUTPUT", style));
     // Tone Morph: the MORPH knob (top row) + the A TONE / B TONE cards.
     pGraphics->AttachControl(new NAMMorphKnobControl(morphKnobArea));
-    pGraphics->AttachControl(new NAMMorphCardsControl(morphCardsArea), kCtrlTagMorphCards);
+    pGraphics->AttachControl(new NAMMorphCardsControl(morphCardsArea), kCtrlTagMorphCards)
+      ->As<NAMMorphCardsControl>()
+      ->SetTexture(asciiToneABitmap);
     pGraphics->AttachControl(
       new NAMDoubleTrackSwitch(doubleTrackSwitchArea, NAMDoubleTrackSwitch::kToggleDoubleTrack, "DOUBLE TRACK"));
     pGraphics->AttachControl(

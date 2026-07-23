@@ -16,17 +16,20 @@ using namespace igraphics;
 
 namespace namtheme
 {
-// Palette (ARGB)
-const IColor BG(255, 14, 14, 17); // window background
-const IColor PANEL(255, 23, 24, 28); // sidebar / favorites strip
-const IColor PANEL2(255, 29, 30, 36); // knob card
-const IColor CARD(255, 32, 33, 41); // tone cards, file rows, meters
-const IColor KNOB_FACE(255, 24, 25, 30);
-const IColor LINE(18, 255, 255, 255); // hairline borders (7% white)
-const IColor TRACK(20, 255, 255, 255); // knob track arc
-const IColor TEXT_MAIN(255, 236, 238, 242);
-const IColor TEXT_DIM(255, 139, 142, 152);
-const IColor TEXT_FAINT(255, 90, 93, 102);
+// AMPRYX palette (ARGB) -- gold-on-black terminal aesthetic.
+const IColor BG(255, 11, 10, 7); // window background (#0b0a07)
+const IColor PANEL(255, 10, 9, 6); // sidebar / favorites strip (#0a0906)
+const IColor PANEL2(255, 15, 13, 8); // knob card (#0f0d08)
+const IColor CARD(255, 16, 14, 9); // tone cards, file rows, meters (#100e09)
+const IColor CARD_RAISED(255, 21, 18, 10); // favorite buttons top (#15120a)
+const IColor KNOB_FACE(255, 11, 10, 7); // knob centre (#0b0a07)
+const IColor LINE(36, 233, 195, 74); // hairline borders (gold @ 14%)
+const IColor BORDER(255, 233, 195, 74); // solid 2px accent border (#e9c34a)
+const IColor TRACK(36, 233, 195, 74); // knob track arc (gold @ 14%)
+const IColor TEXT_MAIN(255, 236, 230, 212); // #ece6d4
+const IColor TEXT_DIM(255, 147, 140, 120); // #938c78
+const IColor TEXT_FAINT(255, 107, 101, 82); // #6b6552
+const IColor GOLD(255, 233, 195, 74); // canonical AMPRYX gold (#e9c34a)
 
 // Runtime accent (user-selectable, persisted by the gallery header).
 inline IColor Accent()
@@ -34,36 +37,152 @@ inline IColor Accent()
 return tonegallery::AccentColor();
 }
 
+// AMPRYX skin fonts. kFontBody/kFontBold keep their legacy names (many controls
+// reference them) but now map to JetBrains Mono via the font registration in the
+// layout function. kFontDisplay is Archivo Black for the wordmark and headers.
 const char* const kFontBody = "Inter-Regular";
 const char* const kFontBold = "Inter-Bold";
+const char* const kFontMono = "JetBrainsMono-Regular";
+const char* const kFontMonoMed = "JetBrainsMono-Medium";
+const char* const kFontMonoBold = "JetBrainsMono-Bold";
+const char* const kFontDisplay = "ArchivoBlack";
 } // namespace namtheme
 
-// A rounded card panel (background layer).
+// A card panel (background layer). AMPRYX skin uses square corners (radius ~0)
+// and a 2px gold border; the border thickness is configurable.
 class ThemedCardControl : public IControl
 {
 public:
-ThemedCardControl(const IRECT& bounds, const IColor& color, float radius, const IColor& border)
+ThemedCardControl(const IRECT& bounds, const IColor& color, float radius, const IColor& border,
+float borderWidth = 2.0f)
 : IControl(bounds)
 , mColor(color)
 , mRadius(radius)
 , mBorder(border)
+, mBorderWidth(borderWidth)
 {
 mIgnoreMouse = true;
 }
 
 void Draw(IGraphics& g) override
 {
+if (mRadius <= 0.5f)
+{
+g.FillRect(mColor, mRECT);
+// Inset the stroke by half its width so the 2px border sits fully inside.
+g.DrawRect(mBorder, mRECT.GetPadded(-0.5f * mBorderWidth), &mBlend, mBorderWidth);
+}
+else
+{
 g.FillRoundRect(mColor, mRECT, mRadius);
-g.DrawRoundRect(mBorder, mRECT, mRadius);
+g.DrawRoundRect(mBorder, mRECT.GetPadded(-0.5f * mBorderWidth), mRadius, &mBlend, mBorderWidth);
+}
 }
 
 private:
 IColor mColor;
 float mRadius;
 IColor mBorder;
+float mBorderWidth;
 };
 
-// "NEURAL AMP MODELER" with the middle word in the accent color.
+// Faint gold dotted-grid texture drawn over the whole window (mock:
+// radial-gradient dot, 4px pitch). Cached to a layer so it costs ~nothing per
+// frame. Attach right after the panel background, before other controls.
+class AmpryxDotGridControl : public IControl
+{
+public:
+AmpryxDotGridControl(const IRECT& bounds, float pitch = 4.0f, float opacity = 0.05f)
+: IControl(bounds)
+, mPitch(pitch)
+, mOpacity(opacity)
+{
+mIgnoreMouse = true;
+}
+
+void Draw(IGraphics& g) override
+{
+if (!g.CheckLayer(mLayer))
+{
+g.StartLayer(this, mRECT);
+const IColor dot = namtheme::GOLD.WithOpacity(mOpacity);
+for (float y = mRECT.T + 1.0f; y < mRECT.B; y += mPitch)
+for (float x = mRECT.L + 1.0f; x < mRECT.R; x += mPitch)
+g.FillRect(dot, IRECT(x, y, x + 1.0f, y + 1.0f));
+mLayer = g.EndLayer();
+}
+g.DrawLayer(mLayer);
+}
+
+void OnResize() override { mLayer = nullptr; }
+
+private:
+float mPitch;
+float mOpacity;
+ILayerPtr mLayer;
+};
+
+// Halftone-engraving background texture (AsciiHero / AsciiToneA). Draws the
+// bitmap "cover"-fit, tinted with the accent, at low opacity behind a radial
+// mask so it fades at the edges -- mirroring the mock's screen-blend video.
+class AmpryxTextureControl : public IControl
+{
+public:
+AmpryxTextureControl(const IRECT& bounds, const IBitmap& bitmap, float opacity = 0.6f, bool flip = false)
+: IControl(bounds)
+, mBitmap(bitmap)
+, mOpacity(opacity)
+, mFlip(flip)
+{
+mIgnoreMouse = true;
+}
+
+void Draw(IGraphics& g) override
+{
+if (mBitmap.W() <= 0 || mBitmap.H() <= 0)
+return;
+// Cover-fit the bitmap inside mRECT.
+const float bmpAspect = (float)mBitmap.W() / (float)mBitmap.H();
+const float areaAspect = mRECT.W() / mRECT.H();
+IRECT cover = mRECT;
+if (bmpAspect > areaAspect)
+cover = mRECT.GetMidHPadded(0.5f * mRECT.H() * bmpAspect);
+else
+cover = mRECT.GetMidVPadded(0.5f * mRECT.W() / bmpAspect);
+
+g.PathClipRegion(mRECT);
+if (mFlip)
+{
+g.PathTransformTranslate(cover.L + cover.R, 0.0f);
+g.PathTransformScale(-1.0f, 1.0f);
+}
+IBlend blend(EBlend::Default, mOpacity);
+g.DrawFittedBitmap(mBitmap, cover, &blend);
+if (mFlip)
+g.PathTransformReset();
+// Gold wash to tint the greyscale engraving toward the accent.
+g.FillRect(namtheme::GOLD.WithOpacity(0.10f), mRECT, &BlendAdd());
+// Radial vignette so the texture reads only in the centre.
+g.PathClear();
+g.PathRect(mRECT);
+g.PathFill(IPattern::CreateRadialGradient(mRECT.MW(), mRECT.MH(), 0.75f * mRECT.W(),
+{{COLOR_TRANSPARENT, 0.35f}, {namtheme::PANEL2.WithOpacity(0.85f), 1.0f}}));
+g.PathClipRegion();
+}
+
+private:
+static IBlend& BlendAdd()
+{
+static IBlend b(EBlend::Add, 1.0f);
+return b;
+}
+IBitmap mBitmap;
+float mOpacity;
+bool mFlip;
+};
+
+// AMPRYX wordmark: the Z sigil (a dotted-ring roundel with a serifed "Z") next
+// to the "AMPRYX" display wordmark and a "NEURAL AMP MODELER" subtitle.
 class ThemedTitleControl : public IControl
 {
 public:
@@ -73,27 +192,64 @@ ThemedTitleControl(const IRECT& bounds)
 mIgnoreMouse = true;
 }
 
+// Draw the Z sigil roundel centred in the given square.
+static void DrawSigil(IGraphics& g, const IRECT& box, const IColor& accent)
+{
+const float cx = box.MW(), cy = box.MH();
+const float r = 0.5f * std::min(box.W(), box.H());
+// Dotted outer ring: a run of short dashes (in degrees) around the circle.
+const int kDashes = 40;
+for (int i = 0; i < kDashes; i++)
+{
+const float a0 = 360.0f * (float)i / kDashes;
+const float a1 = a0 + 0.62f * 360.0f / kDashes;
+g.DrawArc(accent, cx, cy, r * 0.92f, a0, a1, nullptr, r * 0.10f);
+}
+// Faint inverted triangle inside the ring.
+g.PathClear();
+g.PathMoveTo(cx - r * 0.55f, cy - r * 0.38f);
+g.PathLineTo(cx + r * 0.55f, cy - r * 0.38f);
+g.PathLineTo(cx, cy + r * 0.58f);
+g.PathClose();
+g.PathStroke(IPattern(accent.WithOpacity(0.4f)), 1.2f);
+// Vertical staff + top crossbar.
+g.DrawLine(accent, cx, cy - r * 0.66f, cx, cy + r * 0.66f, nullptr, 1.6f);
+g.DrawLine(accent, cx - r * 0.16f, cy - r * 0.55f, cx + r * 0.16f, cy - r * 0.55f, nullptr, 1.6f);
+// Serifed "Z" glyph.
+IText z(r * 1.5f, accent, namtheme::kFontDisplay, EAlign::Center, EVAlign::Middle);
+g.DrawText(z, "Z", IRECT(cx - r, cy - r, cx + r, cy + r));
+// Horizontal bar through the centre (over the Z), with a dark keyline.
+g.DrawLine(accent, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, r * 0.14f);
+g.DrawLine(namtheme::BG, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, 1.2f);
+}
+
 void Draw(IGraphics& g) override
 {
-const float size = 17.0f;
-IText t(size, namtheme::TEXT_MAIN, namtheme::kFontBold, EAlign::Near, EVAlign::Middle);
-const char* seg[3] = {"NEURAL ", "AMP ", "MODELER"};
-float widths[3];
-float total = 0.0f;
-for (int i = 0; i < 3; i++)
-{
-IRECT r;
-g.MeasureText(t, seg[i], r);
-widths[i] = r.W();
-total += widths[i];
-}
-float x = mRECT.MW() - 0.5f * total;
-for (int i = 0; i < 3; i++)
-{
-t.mFGColor = (i == 1) ? namtheme::Accent() : namtheme::TEXT_MAIN;
-g.DrawText(t, seg[i], IRECT(x, mRECT.T, x + widths[i] + 2.0f, mRECT.B));
-x += widths[i];
-}
+const IColor accent = namtheme::Accent();
+const float sig = std::min(mRECT.H(), 44.0f);
+const float gap = 12.0f;
+
+// Measure the wordmark so the sigil + wordmark block can be centred together.
+IText mark(26.0f, namtheme::TEXT_MAIN, namtheme::kFontDisplay, EAlign::Near, EVAlign::Middle);
+IRECT mr;
+g.MeasureText(mark, "AMPRYX", mr);
+const float blockW = sig + gap + mr.W();
+const float x0 = mRECT.MW() - 0.5f * blockW;
+
+const IRECT sigBox(x0, mRECT.MH() - 0.5f * sig, x0 + sig, mRECT.MH() + 0.5f * sig);
+DrawSigil(g, sigBox, accent);
+
+const float tx = sigBox.R + gap;
+// Wordmark with a subtle chromatic-split shadow, like the mock.
+IText markL = mark;
+markL.mFGColor = accent.WithOpacity(0.35f);
+g.DrawText(markL, "AMPRYX", IRECT(tx - 1.5f, mRECT.T - 6.0f, tx + mr.W() + 40.0f, mRECT.B - 6.0f));
+mark.mFGColor = namtheme::TEXT_MAIN;
+g.DrawText(mark, "AMPRYX", IRECT(tx, mRECT.T - 6.0f, tx + mr.W() + 40.0f, mRECT.B - 6.0f));
+
+IText sub(7.5f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
+g.DrawText(sub, "NEURAL AMP MODELER  ·  NIGHTFALL",
+IRECT(tx, mRECT.B - 14.0f, tx + mr.W() + 120.0f, mRECT.B));
 }
 };
 
@@ -294,10 +450,10 @@ IPopupMenu mMenu;
 };
 
 inline const char* const NAMAccentPickerControl::kChoiceNames[NAMAccentPickerControl::kNumChoices] = {
-"Violet", "Teal", "Azure", "Orange", "Crimson", "Emerald"};
+"Gold", "Violet", "Teal", "Azure", "Crimson", "Emerald"};
 inline const IColor NAMAccentPickerControl::kChoiceColors[NAMAccentPickerControl::kNumChoices] = {
-IColor(255, 139, 124, 246), IColor(255, 46, 230, 200), IColor(255, 80, 133, 232),
-IColor(255, 240, 160, 74), IColor(255, 232, 90, 90), IColor(255, 88, 214, 141)};
+IColor(255, 233, 195, 74), IColor(255, 155, 123, 224), IColor(255, 46, 230, 200),
+IColor(255, 80, 133, 232), IColor(255, 232, 90, 90), IColor(255, 88, 214, 141)};
 
 // Compact 1U-style "rack unit" view: photo of the current tone in an LCD-style
 // screen, name, gear chip, favorite buttons and an expand control. Shown by

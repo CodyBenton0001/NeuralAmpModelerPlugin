@@ -24,10 +24,10 @@ const iplug::igraphics::IColor NAM_3(255, 162, 178, 191); // Cadet Blue Crayola
 
 // Evan Heritage theme colors
 const iplug::igraphics::IColor NAM_0(0, 18, 17, 19); // Transparent
-// Tone Gallery fork ("Nightfall" theme): soft violet accent.
-// Upstream was Azure (255, 80, 133, 232).
-const iplug::igraphics::IColor NAM_THEMECOLOR(255, 139, 124, 246); // Violet
-const iplug::igraphics::IColor NAM_THEMEFONTCOLOR(255, 242, 242, 242); // Dark White
+// AMPRYX skin ("Nightfall" theme): gold accent on near-black.
+// Upstream was Azure (255, 80, 133, 232); Tone Gallery fork was Violet.
+const iplug::igraphics::IColor NAM_THEMECOLOR(255, 233, 195, 74); // Gold (#e9c34a)
+const iplug::igraphics::IColor NAM_THEMEFONTCOLOR(255, 236, 230, 212); // #ece6d4
 
 // Misc
 const iplug::igraphics::IColor MOUSEOVER = NAM_THEMEFONTCOLOR.WithOpacity(0.1);
