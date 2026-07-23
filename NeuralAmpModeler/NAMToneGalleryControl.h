@@ -1183,9 +1183,9 @@ public:
 private:
   IRECT SlotRect(int i) const
   {
-    // AMPRYX: slots share the flush span of the panels above (46px in from the
-    // main-panel edges; keep in sync with spanL/spanR in the layout).
-    const IRECT area(mRECT.L + 46.0f, mRECT.T + 8.0f, mRECT.R - 46.0f, mRECT.B - 8.0f);
+    // AMPRYX: slots share the OUTER span of the main column (16px in from the
+    // main-panel edges; keep in sync with outerL/outerR in the layout).
+    const IRECT area(mRECT.L + 16.0f, mRECT.T + 8.0f, mRECT.R - 16.0f, mRECT.B - 8.0f);
     const float gap = 10.0f;
     const float w = (area.W() - gap * (kNumSlots - 1)) / kNumSlots;
     const float x = area.L + i * (w + gap);
