@@ -179,38 +179,31 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto rightRegion = b.GetReducedFromLeft(kSidebarWidth);
     // AMPRYX skin: stacked from the bottom -- utility bar, output scope, the
     // favorites bar, then the main UI above them all.
-    // Same OUTER span as everything in the main column (16px margins).
+    // Same flush span as the knob panel (46px in from the main-panel edges).
     const auto utilityBarArea =
-      rightRegion.GetFromBottom(kUtilityBarHeight).GetReducedFromLeft(16.0f).GetReducedFromRight(16.0f);
+      rightRegion.GetFromBottom(kUtilityBarHeight).GetReducedFromLeft(46.0f).GetReducedFromRight(46.0f);
     const auto outputScopeArea = rightRegion.GetReducedFromBottom(kUtilityBarHeight)
                                    .GetFromBottom(kOutputScopeHeight)
-                                   .GetReducedFromLeft(16.0f)
-                                   .GetReducedFromRight(16.0f)
+                                   .GetReducedFromLeft(46.0f)
+                                   .GetReducedFromRight(46.0f)
                                    .GetVPadded(-4.0f);
     const auto favoritesArea =
       rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight).GetFromBottom(kFavoritesBarHeight);
     const auto mainB = rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight + kFavoritesBarHeight);
     const auto mainArea = mainB.GetPadded(-20);
     const auto contentArea = mainArea.GetPadded(-10);
-    // AMPRYX: ONE outer span shared by everything in the main column -- the
-    // header buttons, the meter bars' outer edges, and every row below the
-    // knob panel. The knob panel is inset so the meters flank it inside the
-    // same span (mock: ~16px margins).
-    const float outerL = mainB.L + 16.0f;
-    const float outerR = mainB.R - 16.0f;
-    const float kMeterW = 10.0f;
-    const float kMeterGap = 8.0f;
     // AMPRYX skin: compact single-row header hugging the top of the panel
     // (sigil logo beside the AMPRYX wordmark, flanked by the TONE3000 and
     // SIGNAL CHAIN buttons). Proportions measured off the reference.
     const auto titleArea = mainB.GetFromTop(64.0f);
 
-    // Areas for knobs (shifted down past the compact header row; inset from
-    // the outer span by meter + gap + card padding on each side).
+    // Areas for knobs (shifted down past the compact header row).
+    const auto knobsPad = 20.0f;
     const auto singleKnobPad = -2.0f;
-    const auto knobsVert = contentArea.GetFromTop(NAM_KNOB_HEIGHT).GetVShifted(46.0f);
-    const auto knobsArea =
-      IRECT(outerL + kMeterW + kMeterGap + 4.0f, knobsVert.T, outerR - kMeterW - kMeterGap - 4.0f, knobsVert.B);
+    const auto knobsArea = contentArea.GetFromTop(NAM_KNOB_HEIGHT)
+                             .GetReducedFromLeft(knobsPad)
+                             .GetReducedFromRight(knobsPad)
+                             .GetVShifted(46.0f);
     // Tone Morph: one extra knob cell on the right of the row for the MORPH knob.
     const int kKnobCols = numKnobs + 1;
     const auto inputKnobArea = knobsArea.GetGridCell(0, kInputLevel, 1, kKnobCols).GetPadded(-singleKnobPad);
@@ -224,18 +217,18 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Toggle bar: a full-width strip under the knob panel holding all four
     // switches evenly spread -- NOISE GATE, EQ, DOUBLE TRACK, BASS CENTER
     // (labels centered under each switch), matching the AMPRYX mock.
-    const auto toggleBar = IRECT(outerL, knobsArea.B + 15.0f, outerR, knobsArea.B + 61.0f);
+    const auto toggleBar = IRECT(knobsArea.L - 4.0f, knobsArea.B + 15.0f, knobsArea.R + 4.0f, knobsArea.B + 61.0f);
     const auto toggleBarInner = toggleBar.GetPadded(-6.0f);
     const auto ngToggleArea = toggleBarInner.GetGridCell(0, 0, 1, 4);
     const auto eqToggleArea = toggleBarInner.GetGridCell(0, 1, 1, 4);
     const auto doubleTrackSwitchArea = toggleBarInner.GetGridCell(0, 2, 1, 4);
     const auto bassCenterSwitchArea = toggleBarInner.GetGridCell(0, 3, 1, 4);
 
-    // AMPRYX skin: everything below the toggle bar shares the OUTER span (the
-    // meters' outer edges). Stacked top-down: A/B tone cards, then the
-    // full-span IR row.
-    const float spanL = outerL;
-    const float spanR = outerR;
+    // AMPRYX skin: everything below the toggle bar shares one flush span with
+    // the knob panel / toggle bar. Stacked top-down: A/B tone cards, then the
+    // full-span IR row (with the IR bypass toggle in a slot at its right end).
+    const float spanL = knobsArea.L - 4.0f;
+    const float spanR = knobsArea.R + 4.0f;
     const auto morphCardsArea = IRECT(spanL, toggleBar.B + 10.0f, spanR, toggleBar.B + 66.0f);
     const auto irArea = IRECT(spanL, morphCardsArea.B + 10.0f, spanR, morphCardsArea.B + 44.0f);
     // The IR bypass switch control is attached hidden (no icon in the AMPRYX
@@ -246,19 +239,19 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto slimIconArea =
       IRECT(irArea.R + 6.f, irArea.MH() - 14.f, irArea.R + 6.f + 2.f * 28.f, irArea.MH() + 14.f);
 
-    // Meters: thin vertical bars at the OUTER span edges, flanking the inset
-    // knob panel (AMPRYX mock).
+    // Meters: thin vertical bars flanking the knob panel (AMPRYX mock).
     const auto knobPanelRect = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
-    const auto inputMeterArea = IRECT(outerL, knobPanelRect.T, outerL + kMeterW, knobPanelRect.B);
-    const auto outputMeterArea = IRECT(outerR - kMeterW, knobPanelRect.T, outerR, knobPanelRect.B);
+    const auto inputMeterArea = IRECT(knobPanelRect.L - 26.0f, knobPanelRect.T, knobPanelRect.L - 8.0f, knobPanelRect.B);
+    const auto outputMeterArea =
+      IRECT(knobPanelRect.R + 8.0f, knobPanelRect.T, knobPanelRect.R + 26.0f, knobPanelRect.B);
 
     // AMPRYX header buttons: slim square TONE3000 (left) + SIGNAL CHAIN
     // (right), vertically centred on the logo row. Sized off the reference
     // (~90/110 x 26 at this panel width).
     const float kHdrBtnH = 26.0f;
-    const IRECT t3kButtonArea(outerL, titleArea.MH() - 0.5f * kHdrBtnH, outerL + 92.0f,
+    const IRECT t3kButtonArea(contentArea.L, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.L + 92.0f,
                               titleArea.MH() + 0.5f * kHdrBtnH);
-    const IRECT chainButtonArea(outerR - 112.0f, titleArea.MH() - 0.5f * kHdrBtnH, outerR,
+    const IRECT chainButtonArea(contentArea.R - 112.0f, titleArea.MH() - 0.5f * kHdrBtnH, contentArea.R,
                                 titleArea.MH() + 0.5f * kHdrBtnH);
 
     // Model loader button
