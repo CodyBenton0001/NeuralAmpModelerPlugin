@@ -471,7 +471,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // zoom/rack/accent/gear icons re-homed at right), plus the wide
     // SIGNAL CHAIN button that stays in the header.
     pGraphics->AttachControl(
-      new AmpryxUtilityBarControl(utilityBarArea, "AMPRYX  \xC2\xB7  NIGHTFALL  v" PLUG_VERSION_STR));
+      new AmpryxUtilityBarControl(utilityBarArea, "AMPRYX  \xC2\xB7  NIGHTFALL  v3.0"));
     const float ubStep = 28.0f;
     const auto ubGearArea = utilityBarArea.GetFromRight(34.0f).GetCentredInside(24.0f);
     const auto ubAccentArea = ubGearArea.GetTranslated(-ubStep, 0.0f);

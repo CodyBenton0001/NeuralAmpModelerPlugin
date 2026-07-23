@@ -47,6 +47,42 @@ const char* const kFontMonoMed = "JetBrainsMono-Medium";
 const char* const kFontMonoBold = "JetBrainsMono-Bold";
 const char* const kFontDisplay = "ArchivoBlack";
 const char* const kFontWordmark = "Archivo-Bold"; // AMPRYX wordmark (spaced bold)
+
+// Measure the width of a string drawn with fixed extra letter-spacing.
+inline float SpacedTextWidth(IGraphics& g, const char* str, IText text, float spacing)
+{
+const int n = (int)strlen(str);
+IText m = text;
+m.mAlign = EAlign::Near;
+float total = 0.0f;
+for (int i = 0; i < n && i < 96; i++)
+{
+char c[2] = {str[i], 0};
+IRECT r;
+g.MeasureText(m, c, r);
+total += r.W() + (i > 0 ? spacing : 0.0f);
+}
+return total;
+}
+
+// Draw text left-aligned from startX with fixed extra letter-spacing (iPlug's
+// IText has no tracking, so we place each glyph by hand).
+inline void DrawSpacedText(IGraphics& g, const char* str, IText text, float startX, float top, float bottom,
+float spacing)
+{
+const int n = (int)strlen(str);
+IText m = text;
+m.mAlign = EAlign::Near;
+float x = startX;
+for (int i = 0; i < n && i < 96; i++)
+{
+char c[2] = {str[i], 0};
+IRECT r;
+g.MeasureText(m, c, r);
+g.DrawText(m, c, IRECT(x, top, x + r.W() + 6.0f, bottom));
+x += r.W() + spacing;
+}
+}
 } // namespace namtheme
 
 // A card panel (background layer). AMPRYX skin uses square corners (radius ~0)
@@ -196,10 +232,11 @@ mIgnoreMouse = true;
 
 void Draw(IGraphics& g) override
 {
-g.FillRect(namtheme::PANEL2, mRECT);
-g.DrawRect(namtheme::LINE, mRECT, &mBlend, 1.0f);
-const IText v(10.0f, namtheme::TEXT_FAINT, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
-g.DrawText(v, mVersion.Get(), mRECT.GetReducedFromLeft(16.0f));
+// AMPRYX footer: near-black strip, faint gold outline, letter-spaced label.
+g.FillRect(namtheme::BG, mRECT);
+g.DrawRect(namtheme::LINE, mRECT.GetPadded(-0.5f), &mBlend, 1.0f);
+const IText v(9.5f, namtheme::TEXT_FAINT, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
+namtheme::DrawSpacedText(g, mVersion.Get(), v, mRECT.L + 18.0f, mRECT.T, mRECT.B, 1.6f);
 }
 
 private:
@@ -257,42 +294,6 @@ g.DrawLine(accent, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, r * 0.14f);
 g.DrawLine(namtheme::BG, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, 1.2f);
 }
 
-// Measure the width of a string drawn with fixed extra letter-spacing.
-static float SpacedTextWidth(IGraphics& g, const char* str, IText text, float spacing)
-{
-const int n = (int)strlen(str);
-IText m = text;
-m.mAlign = EAlign::Near;
-float total = 0.0f;
-for (int i = 0; i < n && i < 96; i++)
-{
-char c[2] = {str[i], 0};
-IRECT r;
-g.MeasureText(m, c, r);
-total += r.W() + (i > 0 ? spacing : 0.0f);
-}
-return total;
-}
-
-// Draw text left-aligned from startX with fixed extra letter-spacing (iPlug's
-// IText has no tracking, so we place each glyph by hand).
-static void DrawSpacedText(IGraphics& g, const char* str, IText text, float startX, float top, float bottom,
-float spacing)
-{
-const int n = (int)strlen(str);
-IText m = text;
-m.mAlign = EAlign::Near;
-float x = startX;
-for (int i = 0; i < n && i < 96; i++)
-{
-char c[2] = {str[i], 0};
-IRECT r;
-g.MeasureText(m, c, r);
-g.DrawText(m, c, IRECT(x, top, x + r.W() + 6.0f, bottom));
-x += r.W() + spacing;
-}
-}
-
 void Draw(IGraphics& g) override
 {
 const IColor accent = namtheme::Accent();
@@ -301,7 +302,7 @@ const IColor accent = namtheme::Accent();
 const float sig = 34.0f;
 const float gap = 10.0f;
 IText mark(24.0f, namtheme::TEXT_MAIN, namtheme::kFontWordmark, EAlign::Near, EVAlign::Middle);
-const float markW = SpacedTextWidth(g, "AMPRYX", mark, 4.0f);
+const float markW = namtheme::SpacedTextWidth(g, "AMPRYX", mark, 4.0f);
 const float blockW = sig + gap + markW;
 const float x0 = mRECT.MW() - 0.5f * blockW;
 
@@ -313,11 +314,11 @@ const float wordTop = mRECT.MH() - 14.0f, wordBot = mRECT.MH() + 8.0f;
 // Subtle chromatic-split shadow, then the wordmark.
 IText markL = mark;
 markL.mFGColor = accent.WithOpacity(0.30f);
-DrawSpacedText(g, "AMPRYX", markL, tx - 1.2f, wordTop, wordBot, 4.0f);
-DrawSpacedText(g, "AMPRYX", mark, tx, wordTop, wordBot, 4.0f);
+namtheme::DrawSpacedText(g, "AMPRYX", markL, tx - 1.2f, wordTop, wordBot, 4.0f);
+namtheme::DrawSpacedText(g, "AMPRYX", mark, tx, wordTop, wordBot, 4.0f);
 
 IText sub(6.5f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
-DrawSpacedText(g, "NEURAL AMP MODELER", sub, tx, wordBot, wordBot + 11.0f, 2.5f);
+namtheme::DrawSpacedText(g, "NEURAL AMP MODELER", sub, tx, wordBot, wordBot + 11.0f, 2.5f);
 }
 };
 
@@ -483,9 +484,8 @@ void Draw(IGraphics& g) override
 {
 if (mMouseIsOver)
 g.FillEllipse(PluginColors::MOUSEOVER, mRECT);
-const IRECT dot = mRECT.GetCentredInside(11.0f);
-g.FillEllipse(namtheme::Accent(), dot);
-g.DrawEllipse(IColor(90, 255, 255, 255), dot);
+// AMPRYX footer: a clean solid accent dot (no ring).
+g.FillEllipse(namtheme::Accent(), mRECT.GetCentredInside(13.0f));
 }
 
 void OnMouseDown(float x, float y, const IMouseMod& mod) override
