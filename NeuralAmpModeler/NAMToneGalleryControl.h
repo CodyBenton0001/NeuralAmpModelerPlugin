@@ -57,7 +57,7 @@ const int kCtrlTagMorphCards = 1009; // NAMChainView.h (main-view A/B tone cards
 const float kSidebarWidth = 210.0f;
 // AMPRYX skin: taller favorite channel buttons (two rows: LED + number + tag on
 // top, tone name below) to match the mock. PLUG_HEIGHT grows to match.
-const float kFavoritesBarHeight = 72.0f;
+const float kFavoritesBarHeight = 84.0f;
 const float kDetailPanelWidth = 240.0f;
 const float kRackViewHeight = 140.0f;
 // AMPRYX skin: utility bar stacked below the favorites bar. PLUG_HEIGHT in
@@ -1085,9 +1085,10 @@ public:
         g.FillRect(PluginColors::MOUSEOVER, slot);
       g.DrawRect(valid ? accent : accent.WithOpacity(0.35f), slot.GetPadded(-1.0f), nullptr, 2.0f);
 
-      const IRECT inner = slot.GetPadded(-12.0f);
-      // Top row: glowing LED + big number (left), gear tag chip (right).
-      const IRECT top = inner.GetFromTop(22.0f);
+      const IRECT inner = slot.GetPadded(-10.0f);
+      // Top row: glowing LED + number (left), gear tag chip (right). The name
+      // gets its own row lower down, with a clear gap between the two.
+      const IRECT top = inner.GetFromTop(20.0f);
       const float ledx = top.L + 5.0f, ledy = top.MH();
       if (valid)
       {
@@ -1097,9 +1098,9 @@ public:
       }
       g.FillCircle(valid ? accent : accent.WithOpacity(0.4f), ledx, ledy, 4.5f);
       const IText numText(
-        20.0f, valid ? accent : accent.WithOpacity(0.4f), "ArchivoBlack", EAlign::Near, EVAlign::Middle);
+        19.0f, valid ? accent : accent.WithOpacity(0.4f), "JetBrainsMono-Bold", EAlign::Near, EVAlign::Middle);
       const char num[2] = {(char)('1' + i), 0};
-      g.DrawText(numText, num, IRECT(ledx + 13.0f, top.T, ledx + 45.0f, top.B));
+      g.DrawText(numText, num, IRECT(ledx + 12.0f, top.T, ledx + 44.0f, top.B));
 
       if (valid)
       {
@@ -1111,8 +1112,8 @@ public:
         g.DrawText(chipText, chip, chipR);
       }
 
-      // Name (bottom row).
-      const IRECT nameR = inner.GetFromBottom(18.0f);
+      // Name: own row at the bottom, left-aligned under the LED.
+      const IRECT nameR = inner.GetFromBottom(16.0f);
       if (valid)
       {
         const IText nameText(13.0f, IColor(255, 236, 230, 212), "JetBrainsMono-Regular", EAlign::Near, EVAlign::Middle);
