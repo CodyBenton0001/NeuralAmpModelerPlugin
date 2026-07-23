@@ -291,6 +291,34 @@ g.DrawLine(accent, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, r * 0.14f);
 g.DrawLine(namtheme::BG, cx - r * 0.62f, cy, cx + r * 0.62f, cy, nullptr, 1.2f);
 }
 
+// Draw text centred in a rect with fixed extra letter-spacing (iPlug's IText
+// has no tracking, so we place each glyph by hand).
+static void DrawSpacedText(IGraphics& g, const char* str, IText text, const IRECT& rect, float spacing)
+{
+const int n = (int)strlen(str);
+if (n <= 0)
+return;
+IText m = text;
+m.mAlign = EAlign::Near;
+float w[96];
+float total = 0.0f;
+for (int i = 0; i < n && i < 96; i++)
+{
+char c[2] = {str[i], 0};
+IRECT r;
+g.MeasureText(m, c, r);
+w[i] = r.W();
+total += w[i] + (i > 0 ? spacing : 0.0f);
+}
+float x = rect.MW() - 0.5f * total;
+for (int i = 0; i < n && i < 96; i++)
+{
+char c[2] = {str[i], 0};
+g.DrawText(m, c, IRECT(x, rect.T, x + w[i] + 6.0f, rect.B));
+x += w[i] + spacing;
+}
+}
+
 void Draw(IGraphics& g) override
 {
 const IColor accent = namtheme::Accent();
@@ -299,17 +327,18 @@ const float sig = 42.0f;
 const IRECT sigBox(mRECT.MW() - 0.5f * sig, mRECT.T, mRECT.MW() + 0.5f * sig, mRECT.T + sig);
 DrawSigil(g, sigBox, accent);
 
-const IRECT wordRect(mRECT.L, sigBox.B + 2.0f, mRECT.R, sigBox.B + 38.0f);
+const IRECT wordRect(mRECT.L, sigBox.B + 2.0f, mRECT.R, sigBox.B + 40.0f);
 IText mark(30.0f, namtheme::TEXT_MAIN, namtheme::kFontDisplay, EAlign::Center, EVAlign::Middle);
-// Subtle chromatic-split shadow, like the mock.
+// Subtle chromatic-split shadow, like the mock, then the wordmark -- both
+// with wide letter-spacing.
 IText markL = mark;
 markL.mFGColor = accent.WithOpacity(0.30f);
-g.DrawText(markL, "AMPRYX", wordRect.GetHShifted(-1.5f));
-g.DrawText(mark, "AMPRYX", wordRect);
+DrawSpacedText(g, "AMPRYX", markL, wordRect.GetHShifted(-1.5f), 10.0f);
+DrawSpacedText(g, "AMPRYX", mark, wordRect, 10.0f);
 
-IText sub(8.0f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Center, EVAlign::Top);
-g.DrawText(sub, "NEURAL AMP MODELER  \xC2\xB7  NIGHTFALL",
-IRECT(mRECT.L, wordRect.B + 1.0f, mRECT.R, wordRect.B + 13.0f));
+IText sub(8.0f, namtheme::TEXT_DIM, namtheme::kFontMono, EAlign::Center, EVAlign::Middle);
+DrawSpacedText(g, "NEURAL AMP MODELER  \xC2\xB7  NIGHTFALL",
+sub, IRECT(mRECT.L, wordRect.B + 1.0f, mRECT.R, wordRect.B + 14.0f), 3.0f);
 }
 };
 

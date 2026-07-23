@@ -387,7 +387,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new AmpryxDotGridControl(b));
     const auto knobCardArea = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
     pGraphics->AttachControl(new ThemedCardControl(knobCardArea, namtheme::PANEL2, 0.0f, namtheme::BORDER, 2.0f));
-    pGraphics->AttachControl(new AmpryxTextureControl(knobCardArea.GetPadded(-2.0f), asciiHeroBitmap, 0.25f));
+    pGraphics->AttachControl(new AmpryxTextureControl(knobCardArea.GetPadded(-2.0f), asciiHeroBitmap, 0.42f));
     // The toggle bar's square gold-bordered background (behind the four switches).
     pGraphics->AttachControl(new ThemedCardControl(toggleBar, namtheme::CARD, 0.0f, namtheme::BORDER, 2.0f));
     // Stacked logo, centred across the full content width (the TONE3000 and
