@@ -91,7 +91,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   // Allow the editor to shrink down to rack-view height (the host clamps
   // resize requests to these constraints).
   // Height range: rack view (short) up to the stacked chain view (tall).
-  SetSizeConstraints(PLUG_WIDTH, PLUG_WIDTH, (int)kRackViewHeight, (int)kChainViewHeight);
+  // AMPRYX skin: the normal window (PLUG_HEIGHT = 558) is now the tallest state
+  // (rack 140 < chain 464 < 558), so the max-height constraint is PLUG_HEIGHT.
+  SetSizeConstraints(PLUG_WIDTH, PLUG_WIDTH, (int)kRackViewHeight, PLUG_HEIGHT);
   GetParam(kInputLevel)->InitGain("Input", 0.0, -20.0, 20.0, 0.1);
   GetParam(kToneBass)->InitDouble("Bass", 5.0, 0.0, 10.0, 0.1);
   GetParam(kToneMid)->InitDouble("Middle", 5.0, 0.0, 10.0, 0.1);
@@ -171,8 +173,17 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Window regions: tone sidebar on the left, favorites bar under the main
     // UI, and the stock 600x400 main UI in the remaining space (mainB).
     const auto sidebarArea = b.GetFromLeft(kSidebarWidth);
-    const auto favoritesArea = b.GetReducedFromLeft(kSidebarWidth).GetFromBottom(kFavoritesBarHeight);
-    const auto mainB = b.GetReducedFromLeft(kSidebarWidth).GetReducedFromBottom(kFavoritesBarHeight);
+    const auto rightRegion = b.GetReducedFromLeft(kSidebarWidth);
+    // AMPRYX skin: stacked from the bottom -- utility bar, output scope, the
+    // favorites bar, then the main UI above them all.
+    const auto utilityBarArea = rightRegion.GetFromBottom(kUtilityBarHeight);
+    const auto outputScopeArea = rightRegion.GetReducedFromBottom(kUtilityBarHeight)
+                                   .GetFromBottom(kOutputScopeHeight)
+                                   .GetHPadded(-20.0f)
+                                   .GetVPadded(-4.0f);
+    const auto favoritesArea =
+      rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight).GetFromBottom(kFavoritesBarHeight);
+    const auto mainB = rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight + kFavoritesBarHeight);
     const auto mainArea = mainB.GetPadded(-20);
     const auto contentArea = mainArea.GetPadded(-10);
     const auto titleHeight = 50.0f;
@@ -196,23 +207,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto outputKnobArea = knobsArea.GetGridCell(0, kOutputLevel, 1, kKnobCols).GetPadded(-singleKnobPad);
     const auto morphKnobArea = knobsArea.GetGridCell(0, numKnobs, 1, kKnobCols).GetPadded(-singleKnobPad);
 
-    // Toggle bar: one rounded strip below the knob panel holding all four
-    // switches -- NOISE GATE + EQ on the left, a gap, then DOUBLE TRACK + BASS
-    // CENTER on the right (labels centered under each switch).
-    const auto toggleBar =
-      IRECT(contentArea.MW() - 220.0f, knobsArea.B + 15.0f, contentArea.MW() + 220.0f, knobsArea.B + 57.0f);
-    const auto toggleBarInner = toggleBar.GetPadded(-5.0f);
-    const float kGroupGap = 20.0f;
-    const float kLeftGroupW = (toggleBarInner.W() - kGroupGap) * 0.46f;
-    const float kRightGroupW = (toggleBarInner.W() - kGroupGap) * 0.54f;
-    const auto leftToggleGroup =
-      IRECT(toggleBarInner.L, toggleBarInner.T, toggleBarInner.L + kLeftGroupW, toggleBarInner.B);
-    const auto rightToggleGroup =
-      IRECT(toggleBarInner.R - kRightGroupW, toggleBarInner.T, toggleBarInner.R, toggleBarInner.B);
-    const auto ngToggleArea = leftToggleGroup.GetGridCell(0, 0, 1, 2);
-    const auto eqToggleArea = leftToggleGroup.GetGridCell(0, 1, 1, 2);
-    const auto doubleTrackSwitchArea = rightToggleGroup.GetGridCell(0, 0, 1, 2);
-    const auto bassCenterSwitchArea = rightToggleGroup.GetGridCell(0, 1, 1, 2);
+    // Toggle bar: a full-width strip under the knob panel holding all four
+    // switches evenly spread -- NOISE GATE, EQ, DOUBLE TRACK, BASS CENTER
+    // (labels centered under each switch), matching the AMPRYX mock.
+    const auto toggleBar = IRECT(knobsArea.L - 4.0f, knobsArea.B + 15.0f, knobsArea.R + 4.0f, knobsArea.B + 61.0f);
+    const auto toggleBarInner = toggleBar.GetPadded(-6.0f);
+    const auto ngToggleArea = toggleBarInner.GetGridCell(0, 0, 1, 4);
+    const auto eqToggleArea = toggleBarInner.GetGridCell(0, 1, 1, 4);
+    const auto doubleTrackSwitchArea = toggleBarInner.GetGridCell(0, 2, 1, 4);
+    const auto bassCenterSwitchArea = toggleBarInner.GetGridCell(0, 3, 1, 4);
 
     // Areas for model and IR
     const auto fileWidth = 200.0f;
@@ -229,9 +232,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       IRECT(irArea.R + 6.f, irArea.MH() - 14.f, irArea.R + 6.f + 2.f * 28.f, irArea.MH() + 14.f);
     const auto morphCardsArea = IRECT(contentArea.L + 26.0f, irArea.T - 62.0f, contentArea.R - 26.0f, irArea.T - 6.0f);
 
-    // Areas for meters
-    const auto inputMeterArea = contentArea.GetFromLeft(30).GetHShifted(-20).GetMidVPadded(100).GetVShifted(-25);
-    const auto outputMeterArea = contentArea.GetFromRight(30).GetHShifted(20).GetMidVPadded(100).GetVShifted(-25);
+    // Meters: thin vertical bars flanking the knob panel (AMPRYX mock).
+    const auto knobPanelRect = knobsArea.GetHPadded(4.0f).GetVPadded(12.0f);
+    const auto inputMeterArea = IRECT(knobPanelRect.L - 26.0f, knobPanelRect.T, knobPanelRect.L - 8.0f, knobPanelRect.B);
+    const auto outputMeterArea =
+      IRECT(knobPanelRect.R + 8.0f, knobPanelRect.T, knobPanelRect.R + 26.0f, knobPanelRect.B);
 
     // Misc Areas
     const auto settingsButtonArea = CornerButtonArea(mainB);
@@ -459,16 +464,25 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new ThemedMeterControl(inputMeterArea, style), kCtrlTagInputMeter);
     pGraphics->AttachControl(new ThemedMeterControl(outputMeterArea, style), kCtrlTagOutputMeter);
 
-    // Titlebar extras: accent color picker, rack-view toggle, and the wide
-    // SIGNAL CHAIN button (which doubles as BACK TO RACK while editing).
-    pGraphics->AttachControl(new NAMAccentPickerControl(settingsButtonArea.GetTranslated(-28.0f, 0.0f)));
-    pGraphics->AttachControl(new NAMRackButtonControl(settingsButtonArea.GetTranslated(-56.0f, 0.0f)));
-    pGraphics->AttachControl(new NAMZoomButtonControl(settingsButtonArea.GetTranslated(-84.0f, 0.0f)));
+    // AMPRYX skin: output waveform scope + bottom utility bar (version text at
+    // left; the zoom/rack/accent/gear icons re-homed at right), plus the wide
+    // SIGNAL CHAIN button that stays in the header.
+    pGraphics->AttachControl(new AmpryxScopeControl(outputScopeArea), kCtrlTagOutputScope);
+    pGraphics->AttachControl(
+      new AmpryxUtilityBarControl(utilityBarArea, "AMPRYX  \xC2\xB7  NIGHTFALL  v" PLUG_VERSION_STR));
+    const float ubStep = 28.0f;
+    const auto ubGearArea = utilityBarArea.GetFromRight(34.0f).GetCentredInside(24.0f);
+    const auto ubAccentArea = ubGearArea.GetTranslated(-ubStep, 0.0f);
+    const auto ubRackArea = ubAccentArea.GetTranslated(-ubStep, 0.0f);
+    const auto ubZoomArea = ubRackArea.GetTranslated(-ubStep, 0.0f);
+    pGraphics->AttachControl(new NAMAccentPickerControl(ubAccentArea));
+    pGraphics->AttachControl(new NAMRackButtonControl(ubRackArea));
+    pGraphics->AttachControl(new NAMZoomButtonControl(ubZoomArea));
     pGraphics->AttachControl(new NAMChainButtonControl(chainButtonArea));
 
-    // Settings/help/about box
+    // Settings/help/about box opener (gear, far right of the utility bar).
     pGraphics->AttachControl(new NAMCircleButtonControl(
-      settingsButtonArea,
+      ubGearArea,
       [pGraphics](IControl* pCaller) {
         pGraphics->GetControlWithTag(kCtrlTagSettingsBox)->As<NAMSettingsPageControl>()->HideAnimated(false);
       },
