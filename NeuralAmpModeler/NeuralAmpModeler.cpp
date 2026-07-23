@@ -542,6 +542,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                       kCtrlTagChainView)
       ->Hide(true);
 
+    // AMPRYX skin: the 2px gold window frame, attached last so it draws over
+    // the sidebar, the panels and any overlay.
+    pGraphics->AttachControl(new AmpryxWindowFrameControl(b));
+
     pGraphics->ForAllControlsFunc([](IControl* pControl) {
       pControl->SetMouseEventsWhenDisabled(true);
       pControl->SetMouseOverWhenDisabled(true);

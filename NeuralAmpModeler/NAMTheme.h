@@ -236,6 +236,20 @@ float mOpacity;
 bool mFlip;
 };
 
+// AMPRYX window frame: the 2px gold border around the whole plugin (mock).
+// Attached last so it draws over the sidebar and every panel.
+class AmpryxWindowFrameControl : public IControl
+{
+public:
+AmpryxWindowFrameControl(const IRECT& bounds)
+: IControl(bounds)
+{
+mIgnoreMouse = true;
+}
+
+void Draw(IGraphics& g) override { g.DrawRect(namtheme::BORDER, mRECT.GetPadded(-1.0f), &mBlend, 2.0f); }
+};
+
 // AMPRYX bottom utility bar background: a thin panel with a hairline top border
 // and the version string. The titlebar icon controls are re-placed on top of it.
 class AmpryxUtilityBarControl : public IControl
