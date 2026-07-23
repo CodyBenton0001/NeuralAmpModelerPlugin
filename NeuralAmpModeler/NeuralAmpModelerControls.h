@@ -43,11 +43,12 @@ NAMSquareButtonControl(const IRECT& bounds, IActionFunction af, const ISVG& svg)
 
 void Draw(IGraphics& g) override
 {
-if (mMouseIsOver)
+if (mMouseIsOver && !IsDisabled())
 g.FillRect(PluginColors::MOUSEOVER, mRECT);
 
-// AMPRYX: tint the icon with the live accent so the colour picker drives it.
-const IColor c = ampryx::Accent();
+// AMPRYX: tint the icon with the live accent so the colour picker drives it;
+// dim it when disabled so unavailable actions still read as present.
+const IColor c = IsDisabled() ? ampryx::Accent().WithOpacity(0.25f) : ampryx::Accent();
 g.DrawSVG(mOffSVG, mRECT, &mBlend, &c, &c);
 }
 };

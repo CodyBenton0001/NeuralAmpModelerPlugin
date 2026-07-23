@@ -425,6 +425,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ui->SetAllControlsDirty();
     };
     auto showSlimOverlay = [](IControl* pCaller) {
+      // The Slim icon is always visible but disabled for models that can't be
+      // slimmed; ignore the click in that state (controls still receive mouse
+      // events when disabled -- see SetMouseEventsWhenDisabled below).
+      if (pCaller->IsDisabled())
+        return;
       IGraphics* ui = pCaller->GetUI();
       if (auto* backdrop = ui->GetControlWithTag(kCtrlTagSlimOverlayBackdrop))
         backdrop->Hide(false);
@@ -433,11 +438,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ui->SetAllControlsDirty();
     };
 
+    // AMPRYX: always shown in the utility bar; dimmed until a slimmable model
+    // is loaded (it used to vanish entirely, which made it hard to find).
     pGraphics
       ->AttachControl(
         new NAMSquareButtonControl(slimIconArea, DefaultClickActionFunc, slimIconSVG), kCtrlTagSlimmableIcon)
       ->SetAnimationEndActionFunction(showSlimOverlay)
-      ->Hide(true);
+      ->SetDisabled(true);
 
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle))
       ->Hide(true); // AMPRYX skin: no bypass icon; the parameter remains automatable
@@ -914,7 +921,10 @@ void NeuralAmpModeler::OnIdle()
       // pGraphics->GetControlWithTag(kCtrlTagOutputMode)->SetDisabled(false);
       static_cast<NAMSettingsPageControl*>(pGraphics->GetControlWithTag(kCtrlTagSettingsBox))->ClearModelInfo();
       if (auto* p = pGraphics->GetControlWithTag(kCtrlTagSlimmableIcon))
-        p->Hide(true);
+      {
+        p->Hide(false); // stays visible, just dimmed with no model loaded
+        p->SetDisabled(true);
+      }
       if (auto* p = pGraphics->GetControlWithTag(kCtrlTagSlimOverlayBackdrop))
         p->Hide(true);
       if (auto* p = pGraphics->GetControlWithTag(kCtrlTagSlimKnob))
@@ -2676,8 +2686,10 @@ void NeuralAmpModeler::_UpdateControlsFromModel()
 
     if (auto* pSlimIcon = pGraphics->GetControlWithTag(kCtrlTagSlimmableIcon))
     {
-      const bool show = mModel->GetSlimmableModel() != nullptr;
-      pSlimIcon->Hide(!show);
+      // Stay visible; just dim when this model can't be slimmed.
+      const bool slimmable = mModel->GetSlimmableModel() != nullptr;
+      pSlimIcon->Hide(false);
+      pSlimIcon->SetDisabled(!slimmable);
     }
   }
 }
