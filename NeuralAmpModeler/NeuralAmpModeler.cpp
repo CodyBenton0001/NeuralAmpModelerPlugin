@@ -125,6 +125,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   };
 
   mLayoutFunc = [&](IGraphics* pGraphics) {
+    // AMPRYX: redraw the whole window rather than per-control dirty rects.
+    // The panel background is built from translucent passes (engraving texture,
+    // washes, vignette, dot grid); a partial repaint composites them over what
+    // is already on screen, so a hover repaint produced slightly different
+    // pixels than the full paint and left seams at every control rect edge.
+    pGraphics->SetStrictDrawing(true);
     pGraphics->AttachCornerResizer(EUIResizerMode::Scale, false);
     pGraphics->AttachTextEntryControl();
     pGraphics->EnableMouseOver(true);
