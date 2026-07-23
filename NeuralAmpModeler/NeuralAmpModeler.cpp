@@ -177,19 +177,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // UI, and the stock 600x400 main UI in the remaining space (mainB).
     const auto sidebarArea = b.GetFromLeft(kSidebarWidth);
     const auto rightRegion = b.GetReducedFromLeft(kSidebarWidth);
-    // AMPRYX skin: stacked from the bottom -- utility bar, output scope, the
-    // favorites bar, then the main UI above them all.
+    // AMPRYX skin: stacked from the bottom -- utility bar, the favorites bar,
+    // then the main UI above them.
     // Same flush span as the knob panel (46px in from the main-panel edges).
     const auto utilityBarArea =
       rightRegion.GetFromBottom(kUtilityBarHeight).GetReducedFromLeft(46.0f).GetReducedFromRight(46.0f);
-    const auto outputScopeArea = rightRegion.GetReducedFromBottom(kUtilityBarHeight)
-                                   .GetFromBottom(kOutputScopeHeight)
-                                   .GetReducedFromLeft(46.0f)
-                                   .GetReducedFromRight(46.0f)
-                                   .GetVPadded(-4.0f);
-    const auto favoritesArea =
-      rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight).GetFromBottom(kFavoritesBarHeight);
-    const auto mainB = rightRegion.GetReducedFromBottom(kUtilityBarHeight + kOutputScopeHeight + kFavoritesBarHeight);
+    const auto favoritesArea = rightRegion.GetReducedFromBottom(kUtilityBarHeight).GetFromBottom(kFavoritesBarHeight);
+    const auto mainB = rightRegion.GetReducedFromBottom(kUtilityBarHeight + kFavoritesBarHeight);
     const auto mainArea = mainB.GetPadded(-20);
     const auto contentArea = mainArea.GetPadded(-10);
     // AMPRYX skin: compact single-row header hugging the top of the panel
@@ -473,10 +467,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new ThemedMeterControl(inputMeterArea, style), kCtrlTagInputMeter);
     pGraphics->AttachControl(new ThemedMeterControl(outputMeterArea, style), kCtrlTagOutputMeter);
 
-    // AMPRYX skin: output waveform scope + bottom utility bar (version text at
-    // left; the zoom/rack/accent/gear icons re-homed at right), plus the wide
+    // AMPRYX skin: bottom utility bar (version text at left; the
+    // zoom/rack/accent/gear icons re-homed at right), plus the wide
     // SIGNAL CHAIN button that stays in the header.
-    pGraphics->AttachControl(new AmpryxScopeControl(outputScopeArea), kCtrlTagOutputScope);
     pGraphics->AttachControl(
       new AmpryxUtilityBarControl(utilityBarArea, "AMPRYX  \xC2\xB7  NIGHTFALL  v" PLUG_VERSION_STR));
     const float ubStep = 28.0f;

@@ -182,50 +182,6 @@ float mOpacity;
 bool mFlip;
 };
 
-// AMPRYX output waveform scope: a gold-bordered panel with an "OUTPUT" / "LIVE"
-// header and a row of 60 accent bars (the mock's static waveform pattern).
-class AmpryxScopeControl : public IControl
-{
-public:
-AmpryxScopeControl(const IRECT& bounds)
-: IControl(bounds)
-{
-mIgnoreMouse = true;
-}
-
-void Draw(IGraphics& g) override
-{
-const IColor accent = namtheme::Accent();
-g.FillRect(namtheme::PANEL2, mRECT);
-g.DrawRect(namtheme::BORDER, mRECT.GetPadded(-1.0f), &mBlend, 2.0f);
-
-const IRECT inner = mRECT.GetPadded(-12.0f);
-const IRECT header = inner.GetFromTop(14.0f);
-const IText lbl(11.0f, namtheme::TEXT_DIM, namtheme::kFontMonoBold, EAlign::Near, EVAlign::Middle);
-g.DrawText(lbl, "OUTPUT", header);
-// "LIVE" indicator (glowing dot + label), right-aligned.
-const IRECT liveR = header.GetFromRight(52.0f);
-const float dotx = liveR.L + 4.0f, doty = liveR.MH();
-g.FillCircle(accent, dotx, doty, 3.5f, &mBlend);
-const IText liveT(10.0f, accent, namtheme::kFontMono, EAlign::Near, EVAlign::Middle);
-g.DrawText(liveT, "LIVE", IRECT(dotx + 8.0f, liveR.T, liveR.R, liveR.B));
-
-const IRECT bars = inner.GetReducedFromTop(20.0f);
-const float midY = bars.MH();
-g.DrawLine(namtheme::LINE, bars.L, midY, bars.R, midY, &mBlend, 1.0f);
-const int kBars = 60;
-const float cellW = bars.W() / (float)kBars;
-for (int i = 0; i < kBars; i++)
-{
-// Taller, varied bars filling the panel (the mock's waveform).
-const float pct = 30.0f + 46.0f * std::fabs(std::sin(i * 0.55f)) + 24.0f * std::fabs(std::cos(i * 0.23f));
-const float h = std::min(pct * 0.01f, 1.0f) * bars.H();
-const float bx = bars.L + i * cellW;
-g.FillRect(accent.WithOpacity(0.85f), IRECT(bx, midY - 0.5f * h, bx + cellW - 1.5f, midY + 0.5f * h), &mBlend);
-}
-}
-};
-
 // AMPRYX bottom utility bar background: a thin panel with a hairline top border
 // and the version string. The titlebar icon controls are re-placed on top of it.
 class AmpryxUtilityBarControl : public IControl
