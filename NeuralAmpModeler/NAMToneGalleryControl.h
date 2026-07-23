@@ -63,7 +63,7 @@ const float kRackViewHeight = 140.0f;
 // AMPRYX skin: output waveform scope + utility bar stacked below the favorites
 // bar. PLUG_HEIGHT in config.h grows by (scope + utility) so the main 600x400
 // UI is unchanged and these sit underneath.
-const float kOutputScopeHeight = 74.0f;
+const float kOutputScopeHeight = 92.0f;
 const float kUtilityBarHeight = 28.0f;
 
 namespace tonegallery

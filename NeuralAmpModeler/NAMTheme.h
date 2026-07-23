@@ -198,7 +198,7 @@ const IColor accent = namtheme::Accent();
 g.FillRect(namtheme::PANEL2, mRECT);
 g.DrawRect(namtheme::BORDER, mRECT.GetPadded(-1.0f), &mBlend, 2.0f);
 
-const IRECT inner = mRECT.GetPadded(-14.0f).GetReducedFromBottom(2.0f);
+const IRECT inner = mRECT.GetPadded(-12.0f);
 const IRECT header = inner.GetFromTop(14.0f);
 const IText lbl(11.0f, namtheme::TEXT_DIM, namtheme::kFontMonoBold, EAlign::Near, EVAlign::Middle);
 g.DrawText(lbl, "OUTPUT", header);
@@ -216,10 +216,11 @@ const int kBars = 60;
 const float cellW = bars.W() / (float)kBars;
 for (int i = 0; i < kBars; i++)
 {
-const float pct = 14.0f + 46.0f * std::fabs(std::sin(i * 0.55f)) + 34.0f * std::fabs(std::cos(i * 0.23f));
+// Taller, varied bars filling the panel (the mock's waveform).
+const float pct = 30.0f + 46.0f * std::fabs(std::sin(i * 0.55f)) + 24.0f * std::fabs(std::cos(i * 0.23f));
 const float h = std::min(pct * 0.01f, 1.0f) * bars.H();
 const float bx = bars.L + i * cellW;
-g.FillRect(accent.WithOpacity(0.75f), IRECT(bx, midY - 0.5f * h, bx + cellW - 1.0f, midY + 0.5f * h), &mBlend);
+g.FillRect(accent.WithOpacity(0.85f), IRECT(bx, midY - 0.5f * h, bx + cellW - 1.5f, midY + 0.5f * h), &mBlend);
 }
 }
 };
@@ -264,13 +265,13 @@ static void DrawSigil(IGraphics& g, const IRECT& box, const IColor& accent)
 {
 const float cx = box.MW(), cy = box.MH();
 const float r = 0.5f * std::min(box.W(), box.H());
-// Dotted outer ring: a run of short dashes (in degrees) around the circle.
-const int kDashes = 40;
-for (int i = 0; i < kDashes; i++)
+// Dotted outer ring: fine round dots around the circle (the mock's roundel).
+const int kDots = 30;
+const float kPi = 3.14159265f;
+for (int i = 0; i < kDots; i++)
 {
-const float a0 = 360.0f * (float)i / kDashes;
-const float a1 = a0 + 0.62f * 360.0f / kDashes;
-g.DrawArc(accent, cx, cy, r * 0.92f, a0, a1, nullptr, r * 0.10f);
+const float ang = (float)i / kDots * 2.0f * kPi;
+g.FillCircle(accent, cx + r * 0.92f * std::sin(ang), cy - r * 0.92f * std::cos(ang), r * 0.05f);
 }
 // Faint inverted triangle inside the ring.
 g.PathClear();
