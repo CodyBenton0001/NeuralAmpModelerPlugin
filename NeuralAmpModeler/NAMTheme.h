@@ -228,6 +228,11 @@ g.DrawLayer(mLayer);
 return;
 }
 g.StartLayer(this, mRECT);
+// Opaque base FIRST so the finished layer is fully opaque. A translucent
+// layer composites over whatever is already on screen, so a partial repaint
+// (e.g. hovering one knob) produces different pixels than the initial full
+// paint -- which showed up as seams at the knob rect edges.
+g.FillRect(namtheme::PANEL2, mRECT);
 // Cover-fit the bitmap inside mRECT.
 const float bmpAspect = (float)mBitmap.W() / (float)mBitmap.H();
 const float areaAspect = mRECT.W() / mRECT.H();
