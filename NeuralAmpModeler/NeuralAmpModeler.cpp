@@ -438,13 +438,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ui->SetAllControlsDirty();
     };
 
-    // AMPRYX: always shown in the utility bar; dimmed until a slimmable model
-    // is loaded (it used to vanish entirely, which made it hard to find).
-    pGraphics
-      ->AttachControl(
-        new NAMSquareButtonControl(slimIconArea, DefaultClickActionFunc, slimIconSVG), kCtrlTagSlimmableIcon)
-      ->SetAnimationEndActionFunction(showSlimOverlay)
-      ->SetDisabled(true);
+    // NOTE: the Slim icon lives in the utility bar and is attached further down,
+    // AFTER the utility-bar background -- attaching it here would put it behind
+    // that fill and make it invisible.
 
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle))
       ->Hide(true); // AMPRYX skin: no bypass icon; the parameter remains automatable
@@ -490,6 +486,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMAccentPickerControl(ubAccentArea));
     pGraphics->AttachControl(new NAMRackButtonControl(ubRackArea));
     pGraphics->AttachControl(new NAMZoomButtonControl(ubZoomArea));
+    // Slim (model-complexity) toggle: always visible here, dimmed until a
+    // slimmable model is loaded. Attached after the bar background so it isn't
+    // painted over.
+    pGraphics
+      ->AttachControl(
+        new NAMSquareButtonControl(slimIconArea, DefaultClickActionFunc, slimIconSVG), kCtrlTagSlimmableIcon)
+      ->SetAnimationEndActionFunction(showSlimOverlay)
+      ->SetDisabled(true);
     pGraphics->AttachControl(new NAMChainButtonControl(chainButtonArea));
 
     // Settings/help/about box opener (gear, far right of the utility bar).
