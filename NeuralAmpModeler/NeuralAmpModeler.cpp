@@ -107,9 +107,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kCalibrateInput)->InitBool(kCalibrateInputParamName.c_str(), kDefaultCalibrateInput);
   GetParam(kInputCalibrationLevel)
     ->InitDouble(kInputCalibrationLevelParamName.c_str(), kDefaultInputCalibrationLevel, -60.0, 60.0, 0.1, "dBu");
-  // NOTE: the old global "Slim" parameter is gone -- model quality is now
-  // per-tone UI state (see ChainSlot::slimA/slimB and mMainSlimA/B), because
-  // swapping sub-models is not real-time safe and shouldn't be automated.
+  // Dormant "Slim" parameter, kept only so the state format stays unchanged
+  // (the 0.7.14+ chunk reader/writer includes it). It has no UI and is never
+  // applied; per-tone model quality lives in mMainSlimA/B & ChainSlot::slimA/B.
+  GetParam(kSlim)->InitDouble("Slim", 1.0, 0.0, 1.0, 0.01);
 
   mNoiseGateTrigger.AddListener(&mNoiseGateGain);
 

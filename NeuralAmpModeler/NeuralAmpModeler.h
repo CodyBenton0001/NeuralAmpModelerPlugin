@@ -47,6 +47,12 @@ enum EParams
   kCalibrateInput,
   kInputCalibrationLevel,
   kOutputMode,
+  // Retained for state compatibility: the 0.7.14+ serialization format writes a
+  // "Slim" parameter, so removing it changed the parameter block and corrupted
+  // saved projects. The global Slim UI is gone; this stays as a dormant, unused
+  // parameter so old and new sessions round-trip byte-for-byte. Model quality is
+  // now per-tone internal state (mMainSlimA/B, ChainSlot::slimA/B).
+  kSlim,
   kNumParams
 };
 
